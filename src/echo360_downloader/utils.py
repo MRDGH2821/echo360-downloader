@@ -1,5 +1,6 @@
 """Utility helpers for path sanitization and cookie handling."""
 
+import os
 import re
 from pathlib import Path
 
@@ -37,5 +38,13 @@ def sanitize_folder_name(name: str) -> str:
 
 
 def default_state_path() -> Path:
-    """Default path for the Playwright storage state file."""
-    return Path.home() / ".echo360" / "state.json"
+    """Default path for the Playwright storage state file.
+
+    Uses XDG_STATE_HOME (default: ~/.local/state) / echo360 / state.json.
+    """
+    xdg_state_home = os.environ.get("XDG_STATE_HOME")
+    if xdg_state_home:
+        base = Path(xdg_state_home)
+    else:
+        base = Path.home() / ".local" / "state"
+    return base / "echo360" / "state.json"

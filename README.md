@@ -25,7 +25,8 @@ Opens a headed browser — complete SSO in the browser window:
 uv run echo360-dl login
 ```
 
-Session cookies are saved to `~/.echo360/state.json` for future use.
+Session cookies are saved to `~/.local/state/echo360/state.json` (XDG_STATE_HOME)
+for future use.
 
 ### 2. List lectures in a course
 

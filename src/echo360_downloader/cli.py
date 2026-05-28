@@ -16,7 +16,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--state",
         type=Path,
         default=default_state_path(),
-        help="Path to Playwright storage state file (default: ~/.echo360/state.json)",
+        help="Path to Playwright storage state file (default: ~/.local/state/echo360/state.json)",
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
