@@ -262,3 +262,7 @@ def main(argv: list[str] | None = None) -> None:
                 args.headed,
             )
         )
+
+
+if __name__ == "__main__":
+    main()
