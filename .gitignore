@@ -1,9 +1,26 @@
-/__pycache__
-/browser-profile
-/cookies.json
-/cookies_netscape.txt
-/course_page.html
-/course_page.png
-/downloads
-/profile/Default
-/storage_state.json
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.venv-echo360/
+
+# Downloads (contents managed by tool)
+downloads/
+
+# Browser profiles (Playwright user-data-dir artifacts)
+browser-profile/
+profile/
+
+# Echo360 session state
+storage_state.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
