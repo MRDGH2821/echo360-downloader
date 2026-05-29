@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,8 @@ from echo360_downloader.utils import sanitize_folder_name
 
 _INITIAL_BATCH = """\
 # echo360-dl batch file
+# Number of concurrent downloads (default: 1 for sequential)
+parallel: 1
 # Add course section URLs under `courses`.
 # Run: echo360-dl batch <this-file>
 #
@@ -45,14 +48,14 @@ def _default_course_entry(url: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def read_batch(path: Path) -> list[dict]:
-    """Load a batch YAML file and return the list of course entries.
+def read_batch(path: Path) -> tuple[int, list[dict]]:
+    """Load a batch YAML file and return (*parallel*, *course_entries*).
 
-    Supports both string entries (just a URL) and dict entries with a
-    ``url`` key.  All entries are normalised to dict form.
+    *parallel* is the number of concurrent stream downloads (default 1).
+    Course entries are normalised to dict form with a ``url`` key.
 
     If the file doesn't exist a template is written and the user is told
-    to edit it.
+    to edit it — returns ``(1, [])``.
     """
     if not path.exists():
         heading("New batch file")
@@ -60,17 +63,21 @@ def read_batch(path: Path) -> list[dict]:
         path.write_text(_INITIAL_BATCH)
         info(f"Created template at [underline]{path}[/]")
         warning("Add course URLs to the file, then re-run this command.")
-        return []
+        return 1, []
 
     raw = yaml.safe_load(path.read_text())
     if not raw or "courses" not in raw:
         warning("No 'courses' list found in the batch file.")
-        return []
+        return 1, []
+
+    parallel = raw.get("parallel", 1)
+    if not isinstance(parallel, int) or parallel < 1:
+        parallel = 1
 
     courses = raw["courses"]
     if not isinstance(courses, list):
         warning("'courses' must be a list.")
-        return []
+        return 1, []
 
     # Normalise: string → dict with url key
     normalised: list[dict] = []
@@ -79,23 +86,185 @@ def read_batch(path: Path) -> list[dict]:
             normalised.append({"url": entry})
         elif isinstance(entry, dict):
             normalised.append(entry)
-    return normalised
+
+    return parallel, normalised
 
 
-def write_batch(path: Path, courses: list[dict]) -> None:
-    """Write course entries (with status) back to the YAML file."""
-    # Build a clean top-level document
+def write_batch(path: Path, courses: list[dict], parallel: int = 1) -> None:
+    """Write course entries (with status) back to the YAML file.
+
+    *parallel* is preserved so the setting survives round-trips.
+    """
     doc: dict[str, Any] = {
-        # A short comment is hard to preserve via pyyaml, so we rely on
-        # the file already existing.  The auto-generated comment above
-        # will be lost on rewrite — that's acceptable.
+        "parallel": parallel,
         "courses": courses,
     }
     path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False))
 
 
 # ---------------------------------------------------------------------------
-# Download logic
+# Capture phase (serial – requires Playwright)
+# ---------------------------------------------------------------------------
+
+
+async def _capture_lecture(
+    ctx,
+    section_url: str,
+    lecture: dict,
+    idx: int,
+    course_root: Path,
+) -> dict | None:
+    """Open a lecture row, capture M3U8 URLs, return metadata dict.
+
+    Returns ``None`` on any failure (row not found, no streams, timeout)
+    so the caller can track it as a failed lecture.
+    """
+    from echo360_downloader.streams import resolve_streams
+
+    title = lecture.get("ariaLabel") or lecture.get("text", f"Lecture {idx}")
+    lesson_id = lecture["lessonId"]
+
+    page = await ctx.new_page()
+    all_m3u8: set[str] = set()
+
+    def _capture(req):
+        url = req.url
+        if ".m3u8" in url and "content.echo360" in url:
+            all_m3u8.add(url)
+
+    page.on("request", _capture)
+
+    try:
+        await page.goto(section_url, wait_until="domcontentloaded", timeout=30_000)
+        await page.wait_for_timeout(2_000)
+
+        # Click the lecture row
+        clicked = await page.evaluate(
+            """(lessonId) => {
+                const rows = document.querySelectorAll('.class-row');
+                for (const row of rows) {
+                    if (row.getAttribute('data-test-lessonid') === lessonId) {
+                        row.scrollIntoView({block: 'center'});
+                        return true;
+                    }
+                }
+                return false;
+            }""",
+            lesson_id,
+        )
+        if not clicked:
+            warning(f"Row not found: {title}")
+            return None
+
+        rows = await page.query_selector_all(f'[data-test-lessonid="{lesson_id}"]')
+        if not rows:
+            warning(f"Selector not found: {title}")
+            return None
+
+        await rows[0].click()
+        await page.wait_for_timeout(12_000)
+        await page.wait_for_timeout(10_000)
+
+        streams = resolve_streams(all_m3u8)
+        if not streams:
+            warning(f"No streams for: {title}")
+            return None
+
+        cookies = await ctx.cookies()
+
+        date_iso = lecture.get("date", "")
+        start_time = lecture.get("startTime", "")
+        date_prefix = f"{date_iso}_{start_time}" if start_time else date_iso
+        folder_name = sanitize_folder_name(f"{date_prefix} - {title}".strip(" -"))
+        lecture_dir = course_root / folder_name
+
+        info(f"Captured: {title} ({', '.join(streams.keys())})")
+
+        return {
+            "title": title,
+            "lesson_id": lesson_id,
+            "date_iso": date_iso,
+            "start_time": start_time,
+            "streams": streams,
+            "cookies": cookies,
+            "lecture_dir": lecture_dir,
+        }
+
+    except Exception as exc:
+        error(f"Capture error ({title}): {exc}")
+        return None
+    finally:
+        await page.close()
+
+
+# ---------------------------------------------------------------------------
+# Download phase (parallel – no Playwright, just ffmpeg)
+# ---------------------------------------------------------------------------
+
+
+async def _download_lecture_streams(
+    lec_info: dict,
+    sem: asyncio.Semaphore,
+) -> dict:
+    """Download all streams for one captured lecture under a semaphore.
+
+    The semaphore is acquired *per stream* rather than per lecture, so
+    ``parallel`` directly controls the maximum number of concurrent ffmpeg
+    processes regardless of how many lectures are in the queue.  Within a
+    lecture the three streams (combined, camera, audio) compete for
+    semaphore slots alongside streams from other lectures.
+    """
+    from echo360_downloader.download import download_stream
+
+    title = lec_info["title"]
+    streams = lec_info["streams"]
+    cookies = lec_info["cookies"]
+    lecture_dir = lec_info["lecture_dir"]
+    audio_url = streams.get("audio")
+
+    lecture_dir.mkdir(parents=True, exist_ok=True)
+
+    stream_results: dict[str, str] = {}
+    lecture_ok = True
+
+    async def _dl(stream_type: str, stream_url: str) -> None:
+        nonlocal lecture_ok
+        # Semaphore acquired per stream — parallel controls total concurrent
+        # ffmpeg processes, not whole-lecture slots.
+        async with sem:
+            output = lecture_dir / f"{stream_type}.mp4"
+
+            if stream_type in ("combined", "camera") and audio_url:
+                ok = await download_stream(
+                    stream_url, output, cookies, audio_url=audio_url
+                )
+            else:
+                ok = await download_stream(stream_url, output, cookies)
+
+            stream_results[stream_type] = "success" if ok else "failed"
+            if not ok:
+                lecture_ok = False
+
+    tasks = [_dl(st, su) for st, su in streams.items()]
+    await asyncio.gather(*tasks)
+
+    entry: dict[str, Any] = {
+        "title": title,
+        "outcome": "success" if lecture_ok else "partial",
+        "streams": stream_results,
+    }
+    date_iso = lec_info.get("date_iso", "")
+    start_time = lec_info.get("start_time", "")
+    if date_iso:
+        entry["date"] = date_iso
+    if start_time:
+        entry["start_time"] = start_time
+
+    return entry
+
+
+# ---------------------------------------------------------------------------
+# Course download (two-phase: capture serially → download in parallel)
 # ---------------------------------------------------------------------------
 
 
@@ -105,15 +274,24 @@ async def _download_course(
     state_path: Path,
     output_dir: Path,
     output_root: Path,
+    parallel: int = 1,
 ) -> dict:
-    """Download all lectures for one course URL, reusing an existing context.
+    """Download all lectures for one course URL.
 
-    Returns a result dict with keys:
-        ``status``, ``course_name``, ``lectures``, ``summary``, (``error``)
+    Two-phase approach to allow safe parallelism:
+
+    **Phase 1** (serial, with Playwright)
+        Capture M3U8 URLs for every lecture by clicking each row and
+        listening to network requests.  Only one Echo360 video can play
+        at a time, so this must be sequential.
+
+    **Phase 2** (parallel, via ffmpeg)
+        Download all captured streams concurrently.  The *parallel*
+        parameter controls how many ffmpeg subprocesses run at once.
+        Browser interaction is no longer needed — every ffmpeg call is
+        an independent subprocess.
     """
-    from echo360_downloader.download import download_stream
     from echo360_downloader.scraper import get_course_name, get_lecture_list
-    from echo360_downloader.streams import resolve_streams
     from echo360_downloader.auth import ensure_session
 
     result: dict = {
@@ -126,7 +304,6 @@ async def _download_course(
     page = await ctx.new_page()
 
     try:
-        # Navigate and ensure we're logged in
         await ensure_session(state_path, page, section_url)
 
         course_name = await get_course_name(page)
@@ -138,7 +315,7 @@ async def _download_course(
 
         lectures = await get_lecture_list(page)
         if not lectures:
-            result["status"] = "completed"  # empty course
+            result["status"] = "completed"
             result["summary"] = {
                 "total": 0,
                 "successful": 0,
@@ -148,141 +325,63 @@ async def _download_course(
             await page.close()
             return result
 
-        # Build lecture dirs and download
+        await page.close()
+
         total = len(lectures)
-        successful = 0
-        failed = 0
-        lecture_results: list[dict] = []
+        console.print(f"\n[bold]Capturing {total} lectures…[/]")
+
+        # ── Phase 1: capture M3U8 URLs (serial, needs browser) ─────
+        captured: list[dict] = []
+        capture_failed = 0
 
         for idx, lec in enumerate(lectures, 1):
             title = lec.get("ariaLabel") or lec.get("text", f"Lecture {idx}")
-            lesson_id = lec["lessonId"]
-
-            # Build the same lecture_dir as single-course download
-            date_iso = lec.get("date", "")
-            start_time = lec.get("startTime", "")
-            date_prefix = f"{date_iso}_{start_time}" if start_time else date_iso
-            folder_name = sanitize_folder_name(f"{date_prefix} - {title}".strip(" -"))
-            lecture_dir = course_root / folder_name
-
             console.print(f"\n[bold][{idx}/{total}] {title}[/]")
+            lec_info = await _capture_lecture(ctx, section_url, lec, idx, course_root)
+            if lec_info is not None:
+                captured.append(lec_info)
+            else:
+                capture_failed += 1
 
-            # Open a new page for this lecture, attach M3U8 listener
-            lec_page = await ctx.new_page()
-            all_m3u8: set[str] = set()
+        if not captured:
+            result["status"] = "completed"
+            result["summary"] = {
+                "total": total,
+                "successful": 0,
+                "failed": total,
+                "downloaded_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            }
+            return result
 
-            def _capture(req):
-                url = req.url
-                if ".m3u8" in url and "content.echo360" in url:
-                    all_m3u8.add(url)
+        # ── Phase 2: download all captured streams (parallel via ffmpeg) ──
+        console.print(
+            f"\n[bold]Downloading {len(captured)} lectures (parallel={parallel})…[/]"
+        )
+        sem = asyncio.Semaphore(parallel)
 
-            lec_page.on("request", _capture)
+        download_tasks = [_download_lecture_streams(ci, sem) for ci in captured]
+        completed = await asyncio.gather(*download_tasks)
 
-            try:
-                await lec_page.goto(
-                    section_url, wait_until="domcontentloaded", timeout=30_000
-                )
-                await lec_page.wait_for_timeout(2_000)
+        # Aggregate results
+        successful = 0
+        dl_failed = 0
+        lecture_results: list[dict] = []
 
-                # Click the lecture row
-                clicked = await lec_page.evaluate(
-                    """(lessonId) => {
-                        const rows = document.querySelectorAll('.class-row');
-                        for (const row of rows) {
-                            if (row.getAttribute('data-test-lessonid') === lessonId) {
-                                row.scrollIntoView({block: 'center'});
-                                return true;
-                            }
-                        }
-                        return false;
-                    }""",
-                    lesson_id,
-                )
-                if not clicked:
-                    warning(f"Row not found: {title}")
-                    failed += 1
-                    lecture_results.append(
-                        {"title": title, "outcome": "failed", "error": "row not found"}
-                    )
-                    continue
+        for entry in completed:
+            lecture_results.append(entry)
+            if entry["outcome"] == "success":
+                successful += 1
+            else:
+                dl_failed += 1
 
-                rows = await lec_page.query_selector_all(
-                    f'[data-test-lessonid="{lesson_id}"]'
-                )
-                if not rows:
-                    warning(f"Selector not found: {title}")
-                    failed += 1
-                    continue
-
-                await rows[0].click()
-                await lec_page.wait_for_timeout(12_000)
-                await lec_page.wait_for_timeout(10_000)
-
-                streams = resolve_streams(all_m3u8)
-                if not streams:
-                    warning(f"No streams for: {title}")
-                    failed += 1
-                    lecture_results.append(
-                        {"title": title, "outcome": "failed", "error": "no streams"}
-                    )
-                    continue
-
-                info(f"Streams: {', '.join(streams.keys())}")
-                lecture_dir.mkdir(parents=True, exist_ok=True)
-                cookies = await ctx.cookies()
-                audio_url = streams.get("audio")
-
-                safe_title = sanitize_folder_name(title)
-                stream_results: dict[str, str] = {}
-                lecture_ok = True
-
-                for stream_type, stream_url in streams.items():
-                    output = lecture_dir / f"{safe_title} - {stream_type}.mp4"
-                    if len(str(output)) > 240:
-                        output = lecture_dir / f"{stream_type}.mp4"
-
-                    if stream_type in ("combined", "camera") and audio_url:
-                        ok = await download_stream(
-                            stream_url, output, cookies, audio_url=audio_url
-                        )
-                    else:
-                        ok = await download_stream(stream_url, output, cookies)
-
-                    stream_results[stream_type] = "success" if ok else "failed"
-                    if not ok:
-                        lecture_ok = False
-
-                lec_entry = {
-                    "title": title,
-                    "outcome": "success" if lecture_ok else "partial",
-                    "streams": stream_results,
-                }
-                if date_iso:
-                    lec_entry["date"] = date_iso
-                if start_time:
-                    lec_entry["start_time"] = start_time
-                lecture_results.append(lec_entry)
-
-                if lecture_ok:
-                    successful += 1
-                else:
-                    failed += 1
-
-            except Exception as exc:
-                error(f"Download error: {exc}")
-                failed += 1
-                lecture_results.append(
-                    {"title": title, "outcome": "failed", "error": str(exc)}
-                )
-            finally:
-                await lec_page.close()
+        total_failed = capture_failed + dl_failed
 
         result["lectures"] = lecture_results
-        result["status"] = "completed" if failed == 0 else "partial"
+        result["status"] = "completed" if total_failed == 0 else "partial"
         result["summary"] = {
             "total": total,
             "successful": successful,
-            "failed": failed,
+            "failed": total_failed,
             "downloaded_at": datetime.datetime.now().isoformat(timespec="seconds"),
         }
 
@@ -290,9 +389,15 @@ async def _download_course(
         result["status"] = "failed"
         result["error"] = str(exc)
     finally:
-        await page.close()
+        if not page.is_closed():
+            await page.close()
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Batch runner
+# ---------------------------------------------------------------------------
 
 
 async def run_batch(
@@ -302,13 +407,13 @@ async def run_batch(
     headed: bool,
 ) -> None:
     """Read the batch YAML, download all courses, write status back."""
-    courses = read_batch(batch_path)
+    parallel, courses = read_batch(batch_path)
     if not courses:
         return
 
     heading("Batch download")
     info(f"File: [underline]{batch_path}[/]")
-    info(f"Courses: {len(courses)}")
+    info(f"Courses: {len(courses)}, parallel downloads: {parallel}")
     divider()
 
     from echo360_downloader.utils import check_ffmpeg
@@ -318,7 +423,6 @@ async def run_batch(
     from playwright.async_api import async_playwright
     from echo360_downloader.auth import do_login
 
-    # Ensure we have a session first
     if not state_path.exists():
         heading("Login required")
         info("No saved session found — starting login.")
@@ -339,7 +443,7 @@ async def run_batch(
             if not url:
                 continue
 
-            # Skip already-completed courses unless they have no summary
+            # Skip already-completed courses
             existing_status = course.get("status", "")
             if existing_status in ("completed", "partial") and "summary" in course:
                 info(
@@ -350,14 +454,19 @@ async def run_batch(
 
             subheading(f"[{i}/{len(courses)}] {url}")
             result = await _download_course(
-                ctx, url, state_path, output_dir, output_root
+                ctx,
+                url,
+                state_path,
+                output_dir,
+                output_root,
+                parallel=parallel,
             )
             updated_courses.append(result)
 
-            # Print per-course summary
+            # Per-course summary
             summary = result.get("summary", {})
             if result["status"] == "failed":
-                error(f"Courses failed: {result.get('error', 'unknown error')}")
+                error(f"Course failed: {result.get('error', 'unknown error')}")
             elif summary:
                 s, f = summary.get("successful", 0), summary.get("failed", 0)
                 if f == 0:
@@ -368,6 +477,5 @@ async def run_batch(
 
         await browser.close()
 
-    # Write results back to the YAML
-    write_batch(batch_path, updated_courses)
+    write_batch(batch_path, updated_courses, parallel=parallel)
     success(f"Batch status written to [underline]{batch_path}[/]")
