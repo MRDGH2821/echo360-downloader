@@ -7,17 +7,12 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-from echo360_downloader.auth import do_login
+from echo360_downloader.auth import do_login, ensure_session
 from echo360_downloader.cli import parse_args
 from echo360_downloader.download import download_stream
-from echo360_downloader.scraper import (
-    get_course_name,
-    get_lecture_list,
-)
+from echo360_downloader.scraper import get_course_name, get_lecture_list
 from echo360_downloader.streams import capture_m3u8_urls, resolve_streams
-from echo360_downloader.utils import (
-    sanitize_folder_name,
-)
+from echo360_downloader.utils import sanitize_folder_name
 
 
 # ---------------------------------------------------------------------------
@@ -62,15 +57,16 @@ async def _cmd_list(state_path: Path, section_url: str) -> None:
             viewport={"width": 1280, "height": 900},
         )
         page = await ctx.new_page()
-        await page.goto(section_url, wait_until="domcontentloaded", timeout=30_000)
-        await page.wait_for_timeout(3_000)
+
+        # Auto-handle stale / missing session
+        await ensure_session(state_path, page, section_url)
 
         course_name = await get_course_name(page)
         print(f"\nCourse: {course_name}")
 
         lectures = await get_lecture_list(page)
         if not lectures:
-            print("No lectures found. Run 'login' first if your session expired.")
+            print("No lectures found.")
             await browser.close()
             return
 
@@ -189,8 +185,8 @@ async def _cmd_download(
         )
         page = await ctx.new_page()
 
-        await page.goto(section_url, wait_until="domcontentloaded", timeout=30_000)
-        await page.wait_for_timeout(3_000)
+        # Auto-handle stale / missing session
+        await ensure_session(state_path, page, section_url)
 
         course_name = await get_course_name(page)
         course_dir_name = sanitize_folder_name(course_name)
@@ -202,7 +198,7 @@ async def _cmd_download(
 
         lectures = await get_lecture_list(page)
         if not lectures:
-            print("No lectures found. Run 'login' first.")
+            print("No lectures found.")
             await browser.close()
             return
 
@@ -237,6 +233,13 @@ async def _cmd_download(
 # ---------------------------------------------------------------------------
 
 
+def _auto_login(state_path: Path) -> None:
+    """Prompt user, perform interactive login, then continue."""
+    print(f"No saved session found at {state_path}")
+    asyncio.run(do_login(state_path))
+    print("Login complete, continuing...\n")
+
+
 def main(argv: list[str] | None = None) -> None:
     """Parse args and dispatch to the appropriate command."""
     args = parse_args(argv)
@@ -246,11 +249,9 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(do_login(state_path))
         return
 
-    # All other commands need a valid session
+    # Auto-login if no session exists yet
     if not state_path.exists():
-        print(f"No saved session found at {state_path}")
-        print("Run 'echo360-dl login' first to authenticate.")
-        sys.exit(1)
+        _auto_login(state_path)
 
     if args.command == "list":
         asyncio.run(_cmd_list(state_path, args.section_url))

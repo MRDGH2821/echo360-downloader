@@ -44,9 +44,10 @@ uv run playwright install chromium
 
 ## Usage
 
-### 1. Login (one-time, interactive)
+### 1. Login (optional)
 
-Opens a headed browser — complete SSO in the browser window:
+If you haven't logged in before, `list` and `download` will
+automatically open a browser for SSO. Or run the login step explicitly:
 
 ```bash
 uv run echo360-dl login

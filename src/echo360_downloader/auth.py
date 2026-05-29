@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from playwright.async_api import async_playwright
+from playwright.async_api import Page, async_playwright
 
 from echo360_downloader.utils import default_state_path
 
@@ -52,3 +52,62 @@ async def do_login(state_path: Path | None = None) -> None:
         )
 
         await browser.close()
+
+
+_LOGIN_DOMAINS = [
+    "login",
+    "sso",
+    "saml",
+    "auth",
+    "signin",
+    "okta",
+    "microsoftonline",
+    "adfs",
+]
+
+
+async def is_login_redirect(page: Page) -> bool:
+    """Check if the current page is an SSO / login page (stale session)."""
+    url = page.url.lower()
+    return any(d in url for d in _LOGIN_DOMAINS)
+
+
+async def ensure_session(
+    state_path: Path,
+    page: Page,
+    course_url: str,
+) -> None:
+    """Navigate to *course_url* and re-authenticate if the session is stale.
+
+    After navigation, if the page was redirected to an SSO login page,
+    the user is prompted to re-authenticate and the session is retried.
+    """
+    await page.goto(course_url, wait_until="domcontentloaded", timeout=30_000)
+    await page.wait_for_timeout(2_000)
+
+    if is_login_redirect(page):
+        print("Session expired or missing — starting re-login.")
+        await do_login(state_path)
+        # Reload the saved session into the current browser context
+        await page.context.add_cookies(
+            [
+                {
+                    "name": c["name"],
+                    "value": c["value"],
+                    "domain": c["domain"],
+                    "path": c.get("path", "/"),
+                }
+                for c in _load_cookies(state_path)
+            ]
+        )
+        await page.goto(course_url, wait_until="domcontentloaded", timeout=30_000)
+        await page.wait_for_timeout(3_000)
+
+
+def _load_cookies(state_path: Path) -> list[dict]:
+    """Load cookies from a Playwright storage-state file."""
+    import json
+
+    with open(state_path) as f:
+        data = json.load(f)
+    return data.get("cookies", [])
