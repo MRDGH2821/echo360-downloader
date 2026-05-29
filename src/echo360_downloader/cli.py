@@ -1,5 +1,7 @@
 """Command-line interface definition."""
 
+from __future__ import annotations
+
 import argparse
 from pathlib import Path
 
@@ -51,6 +53,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Root download directory (default: ./downloads)",
     )
     dl_parser.add_argument(
+        "--headed",
+        action="store_true",
+        default=False,
+        help="Run browser in headed mode (default: headless)",
+    )
+
+    # --- batch ---
+    batch_parser = sub.add_parser("batch", help="Download all courses from a YAML file")
+    batch_parser.add_argument(
+        "batch_file", type=Path, help="Path to the YAML batch file"
+    )
+    batch_parser.add_argument(
+        "--output-dir",
+        "-o",
+        type=Path,
+        default=Path("downloads"),
+        help="Root download directory (default: ./downloads)",
+    )
+    batch_parser.add_argument(
         "--headed",
         action="store_true",
         default=False,

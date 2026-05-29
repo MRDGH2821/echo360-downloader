@@ -328,6 +328,17 @@ def main(argv: list[str] | None = None) -> None:
                 args.headed,
             )
         )
+    elif args.command == "batch":
+        from echo360_downloader.batch import run_batch
+
+        asyncio.run(
+            run_batch(
+                args.batch_file,
+                state_path,
+                args.output_dir,
+                args.headed,
+            )
+        )
 
 
 if __name__ == "__main__":
