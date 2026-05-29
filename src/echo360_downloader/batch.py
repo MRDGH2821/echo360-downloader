@@ -32,7 +32,7 @@ parallel: 1
 # Add course section URLs under `courses`.
 # Run: echo360-dl batch <this-file>
 #
-# After download the file is updated with per-lecture status.
+# Results are written to <this-file-stem>_status.yaml after download.
 courses:
   # - url: https://echo360.net.au/section/<your-section-uuid>
 """
@@ -94,7 +94,53 @@ def write_batch(path: Path, courses: list[dict], parallel: int = 1) -> None:
     """Write course entries (with status) back to the YAML file.
 
     *parallel* is preserved so the setting survives round-trips.
+
+    .. note::
+       ``run_batch`` now writes results to a separate ``_status.yaml``
+       file instead of overwriting the config.  This function is kept
+       for backward compatibility / manual use.
     """
+    doc: dict[str, Any] = {
+        "parallel": parallel,
+        "courses": courses,
+    }
+    path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False))
+
+
+# ---------------------------------------------------------------------------
+# Status file I/O (separate from the config YAML)
+# ---------------------------------------------------------------------------
+
+
+def _status_path(batch_path: Path) -> Path:
+    """Derive the status file path from the batch config path.
+
+    e.g., ``courses.yaml`` → ``courses_status.yaml``
+    """
+    return batch_path.with_stem(batch_path.stem + "_status")
+
+
+def read_status(path: Path) -> dict[str, dict]:
+    """Read existing status file, return *url → entry* mapping.
+
+    Returns an empty dict when the file doesn't exist or can't be parsed.
+    """
+    if not path.exists():
+        return {}
+    try:
+        raw = yaml.safe_load(path.read_text())
+    except Exception:
+        return {}
+    if not raw or "courses" not in raw:
+        return {}
+    courses = raw["courses"]
+    if not isinstance(courses, list):
+        return {}
+    return {c["url"]: c for c in courses if isinstance(c, dict) and c.get("url")}
+
+
+def write_status(path: Path, courses: list[dict], parallel: int) -> None:
+    """Write course results to the status file."""
     doc: dict[str, Any] = {
         "parallel": parallel,
         "courses": courses,
@@ -406,13 +452,16 @@ async def run_batch(
     output_dir: Path,
     headed: bool,
 ) -> None:
-    """Read the batch YAML, download all courses, write status back."""
+    """Read the batch config YAML, download all courses, write status to ``_status.yaml``."""
     parallel, courses = read_batch(batch_path)
     if not courses:
         return
 
+    status_path = _status_path(batch_path)
+
     heading("Batch download")
-    info(f"File: [underline]{batch_path}[/]")
+    info(f"Config: [underline]{batch_path}[/]")
+    info(f"Status: [underline]{status_path}[/]")
     info(f"Courses: {len(courses)}, parallel downloads: {parallel}")
     divider()
 
@@ -428,6 +477,9 @@ async def run_batch(
         info("No saved session found — starting login.")
         await do_login(state_path)
 
+    # Load existing status to skip already-completed courses
+    existing_by_url = read_status(status_path)
+
     output_root = output_dir.resolve()
 
     async with async_playwright() as p:
@@ -437,20 +489,23 @@ async def run_batch(
             viewport={"width": 1280, "height": 900},
         )
 
+        # Build results in config order, reusing existing status when possible
         updated_courses: list[dict] = []
         for i, course in enumerate(courses, 1):
             url = course.get("url", "")
             if not url:
                 continue
 
-            # Skip already-completed courses
-            existing_status = course.get("status", "")
-            if existing_status in ("completed", "partial") and "summary" in course:
-                info(
-                    f"[{i}/{len(courses)}] Skipping [underline]{url}[/] (already done)"
-                )
-                updated_courses.append(course)
-                continue
+            # Skip if already completed in status file
+            if url in existing_by_url:
+                prev = existing_by_url[url]
+                if prev.get("status") in ("completed", "partial") and "summary" in prev:
+                    info(
+                        f"[{i}/{len(courses)}] Skipping [underline]{url}[/] "
+                        f"(already done — see {status_path.name})"
+                    )
+                    updated_courses.append(prev)
+                    continue
 
             subheading(f"[{i}/{len(courses)}] {url}")
             result = await _download_course(
@@ -477,5 +532,5 @@ async def run_batch(
 
         await browser.close()
 
-    write_batch(batch_path, updated_courses, parallel=parallel)
-    success(f"Batch status written to [underline]{batch_path}[/]")
+    write_status(status_path, updated_courses, parallel=parallel)
+    success(f"Batch status written to [underline]{status_path}[/]")

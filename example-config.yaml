@@ -8,7 +8,7 @@
 # Add course section URLs under `courses`.
 # Run: echo360-dl batch <this-file>
 #
-# After download the file is updated with per-lecture status.
+# Results are written to <this-file-stem>_status.yaml after download.
 courses:
 # - url: https://echo360.net.au/section/00000000-0000-0000-0000-000000000000
 # - url: https://echo360.net.au/section/11111111-1111-1111-1111-111111111111

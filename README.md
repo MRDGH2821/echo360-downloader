@@ -88,10 +88,10 @@ uv run echo360-dl download ~/Videos/echo360 < section-url > --output-dir
 
 ### 4. Batch download (multiple courses)
 
-See [`batch-example.yaml`](batch-example.yaml) in the repo root for a template.
+See [`example-config.yaml`](example-config.yaml) in the repo root for a template.
 
 ```bash
-# Create a YAML file with your course URLs (or copy batch-example.yaml)
+# Create a YAML file with your course URLs (or copy example-config.yaml)
 echo360-dl batch courses.yaml
 
 # If courses.yaml doesn't exist, a template is created automatically.
@@ -106,8 +106,11 @@ courses:
 ```
 
 Set `parallel: 3` or `parallel: 4` to download multiple streams at once.
-After completion the same file is updated with per-lecture status and a
-per-course summary — re-run to skip already-downloaded courses.
+
+Results are written to a **separate status file** (`<config>_status.yaml`, e.g.
+`courses_status.yaml`) so your original config stays clean. Re-run the same
+command to skip already-completed courses — the status file is read on startup
+to determine what's already done.
 
 ## Output structure
 
