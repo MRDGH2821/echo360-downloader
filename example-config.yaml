@@ -10,6 +10,6 @@
 #
 # After download the file is updated with per-lecture status.
 courses:
-parallel: 1
 # - url: https://echo360.net.au/section/00000000-0000-0000-0000-000000000000
 # - url: https://echo360.net.au/section/11111111-1111-1111-1111-111111111111
+parallel: 1
