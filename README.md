@@ -4,9 +4,10 @@ Automated lecture downloading from Echo360 using Playwright and ffmpeg.
 
 ## Requirements
 
-- **Python 3.11+**
+- Python 3.11+
 - **[ffmpeg](https://ffmpeg.org/)** on `PATH`
-- A University of Melbourne SSO account with access to Echo360 courses
+- An Echo360 account (primarily designed for University of Melbourne, but should work
+  for other instances too — untested)
 
 ### Windows
 
