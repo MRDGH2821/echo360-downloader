@@ -34,6 +34,7 @@ async def get_lecture_list(page: Page) -> list[dict]:
     * ``ariaLabel``      — row aria-label attribute
     * ``text``           — row text content (truncated)
     * ``date``           — ISO 8601 date (*YYYY-MM-DD*) extracted from the lesson ID
+    * ``startTime``      — 24-hour start time (*HH:mm*) extracted from the lesson ID
     """
     return await page.evaluate("""
         () => {
@@ -41,14 +42,17 @@ async def get_lecture_list(page: Page) -> list[dict]:
             return Array.from(rows).map(row => {
                 const lessonId = row.getAttribute('data-test-lessonid') || '';
                 // lessonId format: G_<uuid>_<section>_<startISO>_<endISO>
+                //   startISO = 2026-03-04T13:05:00.000
                 const parts = lessonId.split('_');
                 const startTime = parts.length >= 4 ? parts[parts.length - 2] : '';
                 const date = startTime ? startTime.substring(0, 10) : '';
+                const start24 = startTime ? startTime.substring(11, 16) : '';
                 return {
                     lessonId,
                     ariaLabel: row.getAttribute('aria-label') || '',
                     text: (row.textContent || '').trim().substring(0, 200),
                     date,
+                    startTime: start24,  // HH:mm in 24hr format
                 };
             });
         }

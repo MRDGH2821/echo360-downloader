@@ -56,16 +56,20 @@ def _lecture_course_dir(
     course_dir_name: str,
     lecture_title: str,
     date_iso: str = "",
+    start_time: str = "",
 ) -> Path:
     """Build the per-lecture subdirectory within a course folder.
 
-    *date_iso* is an ISO 8601 date (YYYY-MM-DD) extracted from the
-    Echo360 lesson ID.  When provided it is used directly rather than
-    trying to guess the date from the lecture *title*.
+    *date_iso* is an ISO 8601 date (YYYY-MM-DD) and *start_time* is the
+    24-hour start time (HH:mm) extracted from the Echo360 lesson ID.
+    When *start_time* is provided the folder name becomes
+    ``YYYY-MM-DD_HH:mm - Title/``, ensuring proper chronological sort
+    even with multiple lectures on the same day.
     """
     if not date_iso:
         date_iso = _parse_date_to_iso(lecture_title)
-    folder_name = sanitize_folder_name(f"{date_iso} - {lecture_title}".strip(" -"))
+    prefix = f"{date_iso}_{start_time}" if start_time else date_iso
+    folder_name = sanitize_folder_name(f"{prefix} - {lecture_title}".strip(" -"))
     return download_root / course_dir_name / folder_name
 
 
@@ -100,8 +104,10 @@ async def _cmd_list(state_path: Path, section_url: str) -> None:
             lesson_id = lec["lessonId"]
             aria = lec.get("ariaLabel", "")
             dt = lec.get("date", "")
+            st = lec.get("startTime", "")
             short = (lesson_id[:60] + "...") if len(lesson_id) > 60 else lesson_id
-            date_info = f" [{dt}]" if dt else ""
+            ts = f"{dt} {st}" if dt and st else dt or ""
+            date_info = f" [{ts}]" if ts else ""
             print(f"  {i:2d}.{date_info} {aria}")
             print(f"       lessonId: {short}")
         await browser.close()
@@ -249,7 +255,11 @@ async def _cmd_download(
             title = lec.get("ariaLabel") or lec.get("text", f"Lecture {idx + 1}")
             lesson_id = lec["lessonId"]
             lecture_dir = _lecture_course_dir(
-                output_dir, course_dir_name, title, lec.get("date", "")
+                output_dir,
+                course_dir_name,
+                title,
+                lec.get("date", ""),
+                lec.get("startTime", ""),
             )
 
             results = await _download_lecture(
