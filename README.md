@@ -1,14 +1,38 @@
 # Echo360 Downloader
 
-[![Copier](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/copier-org/copier/refs/heads/master/img/badge/black-badge.json)](https://github.com/copier-org/copier)
-
 Automated lecture downloading from Echo360 using Playwright and ffmpeg.
 
 ## Requirements
 
-- Python 3.11+
-- [ffmpeg](https://ffmpeg.org/) on `PATH`
-- A University of Melbourne (unimelb) SSO account with access to Echo360 courses
+- **Python 3.11+**
+- **[ffmpeg](https://ffmpeg.org/)** on `PATH`
+- A University of Melbourne SSO account with access to Echo360 courses
+
+### Windows
+
+```powershell
+# Install ffmpeg (via winget)
+winget install ffmpeg
+
+# Or manually: download from https://ffmpeg.org/download.html#build-windows
+# and add the bin\ folder to your PATH
+
+# Install uv (if not already installed)
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+### Linux / macOS
+
+```bash
+# Debian/Ubuntu
+sudo apt install ffmpeg
+
+# macOS
+brew install ffmpeg
+
+# Arch
+sudo pacman -S ffmpeg
+```
 
 ## Setup
 
@@ -27,8 +51,12 @@ Opens a headed browser — complete SSO in the browser window:
 uv run echo360-dl login
 ```
 
-Session cookies are saved to `~/.local/state/echo360/state.json` (XDG_STATE_HOME)
-for future use.
+Session cookies are saved automatically to:
+
+| Platform      | Location                            |
+| ------------- | ----------------------------------- |
+| Linux / macOS | `~/.local/state/echo360/state.json` |
+| Windows       | `%LOCALAPPDATA%\echo360\state.json` |
 
 ### 2. List lectures in a course
 
@@ -96,3 +124,9 @@ echo360-dl --help                 # Full help
 2. **Network interception** captures HLS `.m3u8` URLs from the video player
 3. **ffmpeg** downloads the streams with cookie-based auth
 4. Camera video (`s1`) is muxed with room audio (`s0`) since Echo360 serves it as video-only
+
+## Error handling
+
+- If `ffmpeg` is not installed, `echo360-dl download` prints a platform-specific install hint
+- Session expiry is detected and a re-login hint is shown
+- Stream downloads that time out after 60 minutes are reported individually

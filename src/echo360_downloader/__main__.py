@@ -255,6 +255,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "list":
         asyncio.run(_cmd_list(state_path, args.section_url))
     elif args.command == "download":
+        from echo360_downloader.utils import check_ffmpeg
+
+        check_ffmpeg()
         asyncio.run(
             _cmd_download(
                 state_path,

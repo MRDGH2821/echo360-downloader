@@ -1,4 +1,4 @@
-"""Utility helpers for path sanitization and cookie handling."""
+"""Utility helpers: path sanitization, cookie handling, platform detection."""
 
 import os
 import re
@@ -13,7 +13,7 @@ def sanitize_filename(name: str, max_length: int = 200) -> str:
 
 
 def build_cookie_string(cookies: list[dict], domain_hint: str = "echo360") -> str:
-    """Build a `Cookie` header value from a list of cookie dicts."""
+    """Build a ``Cookie`` header value from a list of cookie dicts."""
     pairs = [
         f"{c['name']}={c['value']}"
         for c in cookies
@@ -36,13 +36,41 @@ def sanitize_folder_name(name: str) -> str:
 
 
 def default_state_path() -> Path:
-    """Default path for the Playwright storage state file.
+    """Path for the Playwright storage state file, platform-aware.
 
-    Uses XDG_STATE_HOME (default: ~/.local/state) / echo360 / state.json.
+    Linux / macOS:  $XDG_STATE_HOME/echo360/state.json
+                    (~/.local/state/echo360/state.json by default)
+
+    Windows:        %LOCALAPPDATA%\\echo360\\state.json
+                    (~\\AppData\\Local\\echo360\\state.json by default)
     """
-    xdg_state_home = os.environ.get("XDG_STATE_HOME")
-    if xdg_state_home:
-        base = Path(xdg_state_home)
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
     else:
-        base = Path.home() / ".local" / "state"
+        xdg = os.environ.get("XDG_STATE_HOME")
+        base = Path(xdg) if xdg else Path.home() / ".local" / "state"
     return base / "echo360" / "state.json"
+
+
+def check_ffmpeg() -> None:
+    """Verify ffmpeg is available on PATH, with a platform-specific hint if not."""
+    import shutil
+
+    if shutil.which("ffmpeg"):
+        return
+
+    if os.name == "nt":
+        msg = (
+            "ffmpeg not found on PATH.\n"
+            "  Install via:  winget install ffmpeg\n"
+            "  Or download:  https://ffmpeg.org/download.html#build-windows\n"
+            "  Then add the bin\\ folder to your PATH."
+        )
+    else:
+        msg = (
+            "ffmpeg not found on PATH.\n"
+            "  Debian/Ubuntu:  sudo apt install ffmpeg\n"
+            "  macOS:          brew install ffmpeg\n"
+            "  Arch:           sudo pacman -S ffmpeg"
+        )
+    raise RuntimeError(msg)
