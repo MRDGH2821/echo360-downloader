@@ -12,9 +12,7 @@ def sanitize_filename(name: str, max_length: int = 200) -> str:
     return safe[:max_length]
 
 
-def build_cookie_string(
-    cookies: list[dict], domain_hint: str = "echo360"
-) -> str:
+def build_cookie_string(cookies: list[dict], domain_hint: str = "echo360") -> str:
     """Build a `Cookie` header value from a list of cookie dicts."""
     pairs = [
         f"{c['name']}={c['value']}"

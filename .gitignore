@@ -1,9 +1,9 @@
 # Python
-__pycache__/
-*.py[cod]
 *.egg-info/
-.venv/
+*.py[cod]
 .venv-echo360/
+.venv/
+__pycache__/
 
 # Downloads (contents managed by tool)
 downloads/
@@ -20,7 +20,9 @@ storage_state.json
 Thumbs.db
 
 # IDE
-.vscode/
-.idea/
-*.swp
 *.swo
+*.swp
+.devenv
+.direnv
+megalinter-reports/
+node_modules/

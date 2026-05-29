@@ -47,8 +47,8 @@ async def do_login(state_path: Path | None = None) -> None:
         with open(state_path, "w") as f:
             json.dump(state, f)
         print(
-            f"Saved {len(state.get('cookies',[]))} cookies "
-            f"and {len(state.get('origins',[]))} origins to {state_path}"
+            f"Saved {len(state.get('cookies', []))} cookies "
+            f"and {len(state.get('origins', []))} origins to {state_path}"
         )
 
         await browser.close()

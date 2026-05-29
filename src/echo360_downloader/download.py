@@ -33,26 +33,41 @@ async def download_stream(
 
     if audio_url:
         cmd = [
-            "ffmpeg", "-y",
-            "-headers", headers,
-            "-i", stream_url,
-            "-headers", headers,
-            "-i", audio_url,
-            "-c", "copy",
-            "-map", "0:v",
-            "-map", "1:a",
+            "ffmpeg",
+            "-y",
+            "-headers",
+            headers,
+            "-i",
+            stream_url,
+            "-headers",
+            headers,
+            "-i",
+            audio_url,
+            "-c",
+            "copy",
+            "-map",
+            "0:v",
+            "-map",
+            "1:a",
             "-shortest",
-            "-movflags", "+faststart",
+            "-movflags",
+            "+faststart",
             str(output_path),
         ]
     else:
         cmd = [
-            "ffmpeg", "-y",
-            "-headers", headers,
-            "-i", stream_url,
-            "-c", "copy",
-            "-bsf:a", "aac_adtstoasc",
-            "-movflags", "+faststart",
+            "ffmpeg",
+            "-y",
+            "-headers",
+            headers,
+            "-i",
+            stream_url,
+            "-c",
+            "copy",
+            "-bsf:a",
+            "aac_adtstoasc",
+            "-movflags",
+            "+faststart",
             str(output_path),
         ]
 
@@ -65,11 +80,15 @@ async def download_stream(
     try:
         _, stderr = await asyncio.wait_for(process.communicate(), timeout=3600)
     except asyncio.TimeoutError:
-        print(f"    TIMEOUT after 3600s")
+        print("    TIMEOUT after 3600s")
         process.kill()
         return False
 
-    if process.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+    if (
+        process.returncode == 0
+        and output_path.exists()
+        and output_path.stat().st_size > 0
+    ):
         size_mb = output_path.stat().st_size / 1024 / 1024
         print(f"    Downloaded: {output_path.name} ({size_mb:.1f} MB)")
         return True

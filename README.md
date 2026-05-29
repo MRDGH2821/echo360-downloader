@@ -1,5 +1,7 @@
 # Echo360 Downloader
 
+[![Copier](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/copier-org/copier/refs/heads/master/img/badge/black-badge.json)](https://github.com/copier-org/copier)
+
 Automated lecture downloading from Echo360 using Playwright and ffmpeg.
 
 ## Requirements
@@ -45,13 +47,13 @@ uv run echo360-dl download <section-url>
 Download a single lecture by index:
 
 ```bash
-uv run echo360-dl download <section-url> 5
+uv run echo360-dl download < section-url > 5
 ```
 
 Custom output directory:
 
 ```bash
-uv run echo360-dl download <section-url> --output-dir ~/Videos/echo360
+uv run echo360-dl download ~/Videos/echo360 < section-url > --output-dir
 ```
 
 ## Output structure
@@ -72,11 +74,11 @@ downloads/
 
 Each lecture folder contains up to 3 files:
 
-| File | Content |
-|------|---------|
-| `combined.mp4` | PIP screen + camera + room audio |
-| `camera.mp4` | Camera only (room audio muxed from s0 stream) |
-| `audio.mp4` | Room audio only |
+| File           | Content                                       |
+| -------------- | --------------------------------------------- |
+| `combined.mp4` | PIP screen + camera + room audio              |
+| `camera.mp4`   | Camera only (room audio muxed from s0 stream) |
+| `audio.mp4`    | Room audio only                               |
 
 ## Commands
 

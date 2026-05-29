@@ -1,0 +1,26 @@
+{
+  "overrides": [
+    {
+      "files": ["*.jsonc", "*.json"],
+      "options": {
+        "parser": "json",
+        "trailingComma": "none"
+      }
+    },
+    {
+      "files": ["*.sh", "**/.envrc"],
+      "options": {
+        "parser": "sh",
+        "trailingComma": "none"
+      }
+    }
+  ],
+  "plugins": [
+    "prettier-plugin-toml",
+    "@prettier/plugin-xml",
+    "prettier-plugin-sh"
+  ],
+  "tabWidth": 2,
+  "trailingComma": "none",
+  "useTabs": false
+}

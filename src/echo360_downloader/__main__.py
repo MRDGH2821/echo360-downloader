@@ -13,11 +13,9 @@ from echo360_downloader.download import download_stream
 from echo360_downloader.scraper import (
     get_course_name,
     get_lecture_list,
-    guess_lecture_folder_name,
 )
 from echo360_downloader.streams import capture_m3u8_urls, resolve_streams
 from echo360_downloader.utils import (
-    default_state_path,
     sanitize_folder_name,
 )
 
@@ -25,6 +23,7 @@ from echo360_downloader.utils import (
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def _resolve_target(target: str | None, total: int) -> list[int]:
     """Convert a user-supplied target into a list of zero-based indices."""
@@ -46,15 +45,14 @@ def _lecture_course_dir(
     """Build the per-lecture subdirectory within a course folder."""
     date_match = re.search(r"(\w+ \d+,? \d{4})", lecture_title)
     date_part = date_match.group(1) if date_match else ""
-    folder_name = sanitize_folder_name(
-        f"{date_part} - {lecture_title}".strip(" -")
-    )
+    folder_name = sanitize_folder_name(f"{date_part} - {lecture_title}".strip(" -"))
     return download_root / course_dir_name / folder_name
 
 
 # ---------------------------------------------------------------------------
 # List
 # ---------------------------------------------------------------------------
+
 
 async def _cmd_list(state_path: Path, section_url: str) -> None:
     async with async_playwright() as p:
@@ -89,6 +87,7 @@ async def _cmd_list(state_path: Path, section_url: str) -> None:
 # ---------------------------------------------------------------------------
 # Download
 # ---------------------------------------------------------------------------
+
 
 async def _download_lecture(
     course_url: str,
@@ -130,7 +129,7 @@ async def _download_lecture(
 
         rows = await page.query_selector_all(f'[data-test-lessonid="{lesson_id}"]')
         if not rows:
-            print(f"    Row not found via selector")
+            print("    Row not found via selector")
             await page.close()
             return {}
 
@@ -141,7 +140,7 @@ async def _download_lecture(
         streams = resolve_streams(m3u8_urls)
 
         if not streams:
-            print(f"    No streams found for this lecture")
+            print("    No streams found for this lecture")
             await page.close()
             return {}
 
@@ -160,7 +159,9 @@ async def _download_lecture(
             print(f"    Downloading {stream_type} stream...")
 
             if stream_type == "camera" and audio_url:
-                ok = await download_stream(stream_url, output, cookies, audio_url=audio_url)
+                ok = await download_stream(
+                    stream_url, output, cookies, audio_url=audio_url
+                )
             else:
                 ok = await download_stream(stream_url, output, cookies)
             results[stream_type] = ok
@@ -213,7 +214,7 @@ async def _cmd_download(
 
         for idx in indices:
             lec = lectures[idx]
-            title = lec.get("ariaLabel") or lec.get("text", f"Lecture {idx+1}")
+            title = lec.get("ariaLabel") or lec.get("text", f"Lecture {idx + 1}")
             lesson_id = lec["lessonId"]
             lecture_dir = _lecture_course_dir(output_dir, course_dir_name, title)
 
@@ -234,6 +235,7 @@ async def _cmd_download(
 # ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
+
 
 def main(argv: list[str] | None = None) -> None:
     """Parse args and dispatch to the appropriate command."""
