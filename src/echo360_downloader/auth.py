@@ -85,7 +85,7 @@ async def ensure_session(
     await page.goto(course_url, wait_until="domcontentloaded", timeout=30_000)
     await page.wait_for_timeout(2_000)
 
-    if is_login_redirect(page):
+    if await is_login_redirect(page):
         print("Session expired or missing — starting re-login.")
         await do_login(state_path)
         # Reload the saved session into the current browser context
