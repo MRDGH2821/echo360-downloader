@@ -1,6 +1,7 @@
 """Console entry point — dispatches to login / list / download."""
 
 import asyncio
+import datetime
 import re
 import sys
 from pathlib import Path
@@ -32,14 +33,31 @@ def _resolve_target(target: str | None, total: int) -> list[int]:
         sys.exit(1)
 
 
+def _parse_date_to_iso(raw: str) -> str:
+    """Extract a date from a lecture title and convert to YYYY-MM-DD.
+
+    Handles formats like ``March 4, 2026`` or ``March 4 2026``.
+    Returns the ISO string, or an empty string if no date is found.
+    """
+    m = re.search(r"(\w+ \d+,? \d{4})", raw)
+    if not m:
+        return ""
+    cleaned = m.group(1).replace(",", "")
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.datetime.strptime(cleaned, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return ""
+
+
 def _lecture_course_dir(
     download_root: Path,
     course_dir_name: str,
     lecture_title: str,
 ) -> Path:
     """Build the per-lecture subdirectory within a course folder."""
-    date_match = re.search(r"(\w+ \d+,? \d{4})", lecture_title)
-    date_part = date_match.group(1) if date_match else ""
+    date_part = _parse_date_to_iso(lecture_title)
     folder_name = sanitize_folder_name(f"{date_part} - {lecture_title}".strip(" -"))
     return download_root / course_dir_name / folder_name
 

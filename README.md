@@ -91,7 +91,7 @@ uv run echo360-dl download ~/Videos/echo360 < section-url > --output-dir
 ```
 downloads/
 ├── COMP90020 - Distributed Algorithms/
-│   ├── March 4, 2026 - .../
+│   ├── 2026-03-04 - Go to class COMP90020_2026_SM1 .../
 │   │   ├── combined.mp4
 │   │   ├── camera.mp4   (room audio muxed in)
 │   │   └── audio.mp4
