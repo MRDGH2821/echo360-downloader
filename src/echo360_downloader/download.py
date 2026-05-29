@@ -1,10 +1,13 @@
 """ffmpeg-based downloading of HLS streams with best-quality variant selection."""
 
+from __future__ import annotations
+
 import asyncio
 import re
 from pathlib import Path
 from urllib.parse import urljoin
 
+from echo360_downloader.ui import dim, error, success, warning
 from echo360_downloader.utils import build_cookie_string
 
 
@@ -79,7 +82,7 @@ async def _best_variant_url(stream_url: str, cookie_str: str) -> str:
                 best_url = urljoin(stream_url, variant_url)
 
     if best_url != stream_url:
-        print(f"    Selected {best_height}p variant from master playlist")
+        dim(f"Selected {best_height}p variant from master playlist")
     return best_url
 
 
@@ -161,7 +164,7 @@ async def download_stream(
     try:
         _, stderr = await asyncio.wait_for(process.communicate(), timeout=3600)
     except asyncio.TimeoutError:
-        print("    TIMEOUT after 3600s")
+        warning("TIMEOUT after 3600s")
         process.kill()
         return False
 
@@ -171,9 +174,9 @@ async def download_stream(
         and output_path.stat().st_size > 0
     ):
         size_mb = output_path.stat().st_size / 1024 / 1024
-        print(f"    Downloaded: {output_path.name} ({size_mb:.1f} MB)")
+        success(f"Downloaded: {output_path.name} ({size_mb:.1f} MB)")
         return True
 
     err = (stderr or b"").decode()[-300:]
-    print(f"    FAILED (exit {process.returncode}): {err}")
+    error(f"Download failed (exit {process.returncode}): {err}")
     return False

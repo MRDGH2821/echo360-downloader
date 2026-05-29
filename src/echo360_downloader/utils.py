@@ -1,5 +1,7 @@
 """Utility helpers: path sanitization, cookie handling, platform detection."""
 
+from __future__ import annotations
+
 import os
 import re
 from pathlib import Path
@@ -59,6 +61,8 @@ def check_ffmpeg() -> None:
     if shutil.which("ffmpeg"):
         return
 
+    from echo360_downloader.ui import error
+
     if os.name == "nt":
         msg = (
             "ffmpeg not found on PATH.\n"
@@ -73,4 +77,5 @@ def check_ffmpeg() -> None:
             "  macOS:          brew install ffmpeg\n"
             "  Arch:           sudo pacman -S ffmpeg"
         )
+    error(msg)
     raise RuntimeError(msg)

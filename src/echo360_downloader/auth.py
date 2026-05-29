@@ -1,10 +1,13 @@
 """SSO login and session persistence for Echo360."""
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
 from playwright.async_api import Page, async_playwright
 
+from echo360_downloader.ui import info, success, warning
 from echo360_downloader.utils import default_state_path
 
 
@@ -19,8 +22,8 @@ async def do_login(state_path: Path | None = None) -> None:
     state_path = state_path or default_state_path()
     state_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print("Opening browser for Echo360 login...")
-    print("(Complete the SSO login in the browser window that opens)")
+    info("Opening browser for Echo360 login...")
+    warning("Complete the SSO login in the browser window that opens")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False)
@@ -28,17 +31,17 @@ async def do_login(state_path: Path | None = None) -> None:
         page = await ctx.new_page()
 
         await page.goto("https://echo360.net.au", timeout=60_000)
-        print(f"Current URL: {page.url}")
-        print("Waiting for login to complete...")
+        info(f"Navigated to [underline]{page.url}[/]")
+        info("Waiting for login to complete...")
 
         while True:
             await page.wait_for_timeout(2_000)
             url = page.url
             if "/section/" in url and "/home" in url:
-                print(f"Login successful! URL: {url}")
+                success(f"Login successful! [dim]{url}[/dim]")
                 break
             if "/lesson/" in url:
-                print(f"Login successful! (redirected to lesson) URL: {url}")
+                success(f"Login successful! [dim]{url}[/dim]")
                 break
 
         await page.wait_for_timeout(3_000)
@@ -46,9 +49,10 @@ async def do_login(state_path: Path | None = None) -> None:
         state = await ctx.storage_state()
         with open(state_path, "w") as f:
             json.dump(state, f)
-        print(
+        info(
             f"Saved {len(state.get('cookies', []))} cookies "
-            f"and {len(state.get('origins', []))} origins to {state_path}"
+            f"and {len(state.get('origins', []))} origins "
+            f"to [underline]{state_path}[/]"
         )
 
         await browser.close()
@@ -86,7 +90,7 @@ async def ensure_session(
     await page.wait_for_timeout(2_000)
 
     if await is_login_redirect(page):
-        print("Session expired or missing — starting re-login.")
+        warning("Session expired or missing — starting re-login.")
         await do_login(state_path)
         # Reload the saved session into the current browser context
         await page.context.add_cookies(

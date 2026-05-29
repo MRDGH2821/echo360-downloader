@@ -1,5 +1,7 @@
 """Console entry point — dispatches to login / list / download."""
 
+from __future__ import annotations
+
 import asyncio
 import datetime
 import re
@@ -13,6 +15,16 @@ from echo360_downloader.cli import parse_args
 from echo360_downloader.download import download_stream
 from echo360_downloader.scraper import get_course_name, get_lecture_list
 from echo360_downloader.streams import resolve_streams
+from echo360_downloader.ui import (
+    console,
+    divider,
+    error,
+    heading,
+    info,
+    lecture_list_table,
+    success,
+    warning,
+)
 from echo360_downloader.utils import sanitize_folder_name
 
 
@@ -29,7 +41,7 @@ def _resolve_target(target: str | None, total: int) -> list[int]:
         n = int(target)
         return [n - 1]  # 1-indexed → 0-indexed
     except ValueError:
-        print(f"Invalid target: {target}. Use a number, 'ALL', or omit.")
+        error(f"Invalid target: {target}. Use a number, 'ALL', or omit.")
         sys.exit(1)
 
 
@@ -91,25 +103,15 @@ async def _cmd_list(state_path: Path, section_url: str) -> None:
         await ensure_session(state_path, page, section_url)
 
         course_name = await get_course_name(page)
-        print(f"\nCourse: {course_name}")
+        heading(f"Course: {course_name}")
 
         lectures = await get_lecture_list(page)
         if not lectures:
-            print("No lectures found.")
+            warning("No lectures found.")
             await browser.close()
             return
 
-        print(f"Found {len(lectures)} lectures:\n")
-        for i, lec in enumerate(lectures, 1):
-            lesson_id = lec["lessonId"]
-            aria = lec.get("ariaLabel", "")
-            dt = lec.get("date", "")
-            st = lec.get("startTime", "")
-            short = (lesson_id[:60] + "...") if len(lesson_id) > 60 else lesson_id
-            ts = f"{dt} {st}" if dt and st else dt or ""
-            date_info = f" [{ts}]" if ts else ""
-            print(f"  {i:2d}.{date_info} {aria}")
-            print(f"       lessonId: {short}")
+        lecture_list_table(lectures, course_name)
         await browser.close()
 
 
@@ -128,7 +130,7 @@ async def _download_lecture(
 ) -> dict[str, bool]:
     """Download all available streams for a single lecture."""
     prefix = f"[{idx}] " if idx else ""
-    print(f"\n{prefix}Processing: {lecture_title}")
+    console.print(f"\n{prefix}[bold]{lecture_title}[/]")
 
     page = await ctx.new_page()
     all_m3u8: set[str] = set()
@@ -160,13 +162,13 @@ async def _download_lecture(
             lesson_id,
         )
         if not clicked:
-            print(f"    Row not found for lessonId: {lesson_id[:60]}")
+            warning(f"Row not found for lessonId: {lesson_id[:60]}")
             await page.close()
             return {}
 
         rows = await page.query_selector_all(f'[data-test-lessonid="{lesson_id}"]')
         if not rows:
-            print("    Row not found via selector")
+            warning("Row not found via selector")
             await page.close()
             return {}
 
@@ -178,11 +180,11 @@ async def _download_lecture(
         streams = resolve_streams(all_m3u8)
 
         if not streams:
-            print("    No streams found for this lecture")
+            warning("No streams found for this lecture")
             await page.close()
             return {}
 
-        print(f"    Streams available: {', '.join(streams.keys())}")
+        info(f"Streams: {', '.join(streams.keys())}")
 
         # Save each stream
         lecture_dir.mkdir(parents=True, exist_ok=True)
@@ -194,7 +196,6 @@ async def _download_lecture(
             output = lecture_dir / f"{safe_title} - {stream_type}.mp4"
             if len(str(output)) > 240:
                 output = lecture_dir / f"{stream_type}.mp4"
-            print(f"    Downloading {stream_type} stream...")
 
             if stream_type in ("combined", "camera") and audio_url:
                 ok = await download_stream(
@@ -205,7 +206,7 @@ async def _download_lecture(
             streams_result[stream_type] = ok
 
     except Exception as exc:
-        print(f"    ERROR: {exc}")
+        error(f"Download error: {exc}")
     finally:
         await page.close()
 
@@ -235,17 +236,21 @@ async def _cmd_download(
         course_root = output_dir / course_dir_name
         course_root.mkdir(parents=True, exist_ok=True)
 
-        print(f"\nCourse: {course_name}")
-        print(f"Output: {course_root}/\n")
+        heading(f"Course: {course_name}")
+        info(f"Output: [underline]{course_root}/[/]")
+        console.print()
 
         lectures = await get_lecture_list(page)
         if not lectures:
-            print("No lectures found.")
+            warning("No lectures found.")
             await browser.close()
             return
 
         indices = _resolve_target(target, len(lectures))
-        print(f"Downloading {len(indices)} lecture(s) out of {len(lectures)} total")
+        console.print(
+            f"[dim]Downloading {len(indices)} lecture(s) out of "
+            f"{len(lectures)} total[/dim]"
+        )
 
         total_streams = 0
         successful = 0
@@ -270,9 +275,15 @@ async def _cmd_download(
                 if ok:
                     successful += 1
 
-        print(f"\n{'=' * 50}")
-        print(f"Done! {successful}/{total_streams} streams downloaded successfully.")
-        print(f"Output directory: {course_root}")
+        divider()
+        if successful == total_streams:
+            success(f"All {successful}/{total_streams} streams downloaded successfully")
+        else:
+            warning(
+                f"{successful}/{total_streams} streams downloaded "
+                f"({total_streams - successful} failed)"
+            )
+        info(f"Output: [underline]{course_root}/[/]")
         await browser.close()
 
 
@@ -283,9 +294,9 @@ async def _cmd_download(
 
 def _auto_login(state_path: Path) -> None:
     """Prompt user, perform interactive login, then continue."""
-    print(f"No saved session found at {state_path}")
+    info(f"No saved session found at [underline]{state_path}[/]")
     asyncio.run(do_login(state_path))
-    print("Login complete, continuing...\n")
+    success("Login complete, continuing...")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -294,6 +305,7 @@ def main(argv: list[str] | None = None) -> None:
     state_path = args.state
 
     if args.command == "login":
+        heading("Echo360 Login")
         asyncio.run(do_login(state_path))
         return
 

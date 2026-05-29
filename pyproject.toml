@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Automated Echo360 lecture downloader using Playwright and ffmpeg"
 requires-python = ">=3.11"
 authors = [{ name = "MRDGH2821" }]
-dependencies = ["playwright>=1.50"]
+dependencies = ["playwright>=1.50", "rich>=13.0"]
 
 [project.scripts]
 echo360-dl = "echo360_downloader.__main__:main"
