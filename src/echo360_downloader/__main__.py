@@ -55,10 +55,17 @@ def _lecture_course_dir(
     download_root: Path,
     course_dir_name: str,
     lecture_title: str,
+    date_iso: str = "",
 ) -> Path:
-    """Build the per-lecture subdirectory within a course folder."""
-    date_part = _parse_date_to_iso(lecture_title)
-    folder_name = sanitize_folder_name(f"{date_part} - {lecture_title}".strip(" -"))
+    """Build the per-lecture subdirectory within a course folder.
+
+    *date_iso* is an ISO 8601 date (YYYY-MM-DD) extracted from the
+    Echo360 lesson ID.  When provided it is used directly rather than
+    trying to guess the date from the lecture *title*.
+    """
+    if not date_iso:
+        date_iso = _parse_date_to_iso(lecture_title)
+    folder_name = sanitize_folder_name(f"{date_iso} - {lecture_title}".strip(" -"))
     return download_root / course_dir_name / folder_name
 
 
@@ -92,8 +99,10 @@ async def _cmd_list(state_path: Path, section_url: str) -> None:
         for i, lec in enumerate(lectures, 1):
             lesson_id = lec["lessonId"]
             aria = lec.get("ariaLabel", "")
+            dt = lec.get("date", "")
             short = (lesson_id[:60] + "...") if len(lesson_id) > 60 else lesson_id
-            print(f"  {i:2d}. {aria}")
+            date_info = f" [{dt}]" if dt else ""
+            print(f"  {i:2d}.{date_info} {aria}")
             print(f"       lessonId: {short}")
         await browser.close()
 
@@ -230,7 +239,9 @@ async def _cmd_download(
             lec = lectures[idx]
             title = lec.get("ariaLabel") or lec.get("text", f"Lecture {idx + 1}")
             lesson_id = lec["lessonId"]
-            lecture_dir = _lecture_course_dir(output_dir, course_dir_name, title)
+            lecture_dir = _lecture_course_dir(
+                output_dir, course_dir_name, title, lec.get("date", "")
+            )
 
             results = await _download_lecture(
                 section_url, ctx, lesson_id, title, lecture_dir, idx + 1

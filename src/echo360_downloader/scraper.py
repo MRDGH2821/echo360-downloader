@@ -26,24 +26,30 @@ async def get_course_name(page: Page) -> str:
 
 
 async def get_lecture_list(page: Page) -> list[dict]:
-    """Extract lecture rows from the course page DOM."""
+    """Extract lecture rows from the course page DOM.
+
+    Each dict returned contains:
+
+    * ``lessonId``       — Echo360 lesson identifier (contains embedded ISO timestamps)
+    * ``ariaLabel``      — row aria-label attribute
+    * ``text``           — row text content (truncated)
+    * ``date``           — ISO 8601 date (*YYYY-MM-DD*) extracted from the lesson ID
+    """
     return await page.evaluate("""
         () => {
             const rows = document.querySelectorAll('.class-row');
-            return Array.from(rows).map(row => ({
-                lessonId: row.getAttribute('data-test-lessonid') || '',
-                ariaLabel: row.getAttribute('aria-label') || '',
-                text: (row.textContent || '').trim().substring(0, 200),
-            }));
+            return Array.from(rows).map(row => {
+                const lessonId = row.getAttribute('data-test-lessonid') || '';
+                // lessonId format: G_<uuid>_<section>_<startISO>_<endISO>
+                const parts = lessonId.split('_');
+                const startTime = parts.length >= 4 ? parts[parts.length - 2] : '';
+                const date = startTime ? startTime.substring(0, 10) : '';
+                return {
+                    lessonId,
+                    ariaLabel: row.getAttribute('aria-label') || '',
+                    text: (row.textContent || '').trim().substring(0, 200),
+                    date,
+                };
+            });
         }
     """)
-
-
-def guess_lecture_folder_name(title: str) -> str:
-    """Determine the folder name that will be used for a lecture."""
-    m = re.search(r"(\w+ \d+,? \d{4})", title)
-    date_part = m.group(1) if m else ""
-    raw = f"{date_part} - {title}".strip(" -")
-    safe = re.sub(r'[<>:"/\\|?*]', "", raw)
-    safe = re.sub(r"\s+", " ", safe).strip()
-    return safe[:200]
