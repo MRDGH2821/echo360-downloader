@@ -1,0 +1,15 @@
+---
+# echo360-dl batch file
+# Number of concurrent downloads (default: 1 for sequential)
+# Increase this to speed up downloads — tune based on your CPU/network:
+#   parallel: 1   → download one stream at a time
+#   parallel: 3   → up to 3 concurrent ffmpeg processes
+#   parallel: 4   → up to 4 concurrent ffmpeg processes
+# Add course section URLs under `courses`.
+# Run: echo360-dl batch <this-file>
+#
+# After download the file is updated with per-lecture status.
+courses:
+parallel: 1
+# - url: https://echo360.net.au/section/00000000-0000-0000-0000-000000000000
+# - url: https://echo360.net.au/section/11111111-1111-1111-1111-111111111111

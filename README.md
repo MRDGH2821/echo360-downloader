@@ -74,7 +74,7 @@ Download all lectures:
 uv run echo360-dl download <section-url>
 ```
 
-Download a single lecture by index:
+Download a single lecture by index (1-based):
 
 ```bash
 uv run echo360-dl download < section-url > 5
@@ -86,12 +86,35 @@ Custom output directory:
 uv run echo360-dl download ~/Videos/echo360 < section-url > --output-dir
 ```
 
+### 4. Batch download (multiple courses)
+
+See [`batch-example.yaml`](batch-example.yaml) in the repo root for a template.
+
+```bash
+# Create a YAML file with your course URLs (or copy batch-example.yaml)
+echo360-dl batch courses.yaml
+
+# If courses.yaml doesn't exist, a template is created automatically.
+```
+
+The YAML file supports a `parallel` setting for concurrent downloads:
+
+```yaml
+parallel: 1 # sequential (default)
+courses:
+  - url: https://echo360.net.au/section/00000000-0000-0000-0000-000000000000
+```
+
+Set `parallel: 3` or `parallel: 4` to download multiple streams at once.
+After completion the same file is updated with per-lecture status and a
+per-course summary — re-run to skip already-downloaded courses.
+
 ## Output structure
 
 ```
 downloads/
 ├── COMP90020 - Distributed Algorithms/
-│   ├── 2026-03-04 - Go to class COMP90020_2026_SM1 .../
+│   ├── 2026-03-04_15:15 - Go to class .../
 │   │   ├── combined.mp4
 │   │   ├── camera.mp4   (room audio muxed in)
 │   │   └── audio.mp4
@@ -110,14 +133,16 @@ Each lecture folder contains up to 3 files:
 | `camera.mp4`   | Camera only (room audio muxed from s0 stream) |
 | `audio.mp4`    | Room audio only                               |
 
+Folders use `YYYY-MM-DD_HH:mm - Title/` format for proper chronological sorting.
+
 ## Commands
 
 ```
-echo360-dl login                  # Interactive SSO login
-echo360-dl list <url>             # List lectures in a course
-echo360-dl download <url> [N]     # Download lecture N (or all)
-echo360-dl download <url> --all   # Download all lectures
-echo360-dl --help                 # Full help
+echo360-dl login                  Interactive SSO login
+echo360-dl list <url>             List lectures in a course
+echo360-dl download <url> [N]     Download lecture N (or all)
+echo360-dl batch <file.yaml>      Batch download from YAML course list
+echo360-dl --help                 Full help
 ```
 
 ## How it works
@@ -126,9 +151,13 @@ echo360-dl --help                 # Full help
 2. **Network interception** captures HLS `.m3u8` URLs from the video player
 3. **ffmpeg** downloads the streams with cookie-based auth
 4. Camera video (`s1`) is muxed with room audio (`s0`) since Echo360 serves it as video-only
+5. **Batch mode** uses a two-phase approach: capture all M3U8 URLs serially (only one
+   video can play at a time), then download all streams in parallel (configurable via
+   `parallel` in the YAML)
 
 ## Error handling
 
 - If `ffmpeg` is not installed, `echo360-dl download` prints a platform-specific install hint
 - Session expiry is detected and a re-login hint is shown
 - Stream downloads that time out after 60 minutes are reported individually
+- Batch mode skips already-completed courses on re-run and records per-lecture outcomes
