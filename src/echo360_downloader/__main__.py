@@ -12,7 +12,7 @@ from echo360_downloader.auth import do_login, ensure_session
 from echo360_downloader.cli import parse_args
 from echo360_downloader.download import download_stream
 from echo360_downloader.scraper import get_course_name, get_lecture_list
-from echo360_downloader.streams import capture_m3u8_urls, resolve_streams
+from echo360_downloader.streams import resolve_streams
 from echo360_downloader.utils import sanitize_folder_name
 
 
@@ -125,7 +125,15 @@ async def _download_lecture(
     print(f"\n{prefix}Processing: {lecture_title}")
 
     page = await ctx.new_page()
-    results: dict[str, bool] = {}
+    all_m3u8: set[str] = set()
+    streams_result: dict[str, bool] = {}
+
+    def _capture(req):
+        url = req.url
+        if ".m3u8" in url and "content.echo360" in url:
+            all_m3u8.add(url)
+
+    page.on("request", _capture)
 
     try:
         await page.goto(course_url, wait_until="domcontentloaded", timeout=30_000)
@@ -158,9 +166,10 @@ async def _download_lecture(
 
         await rows[0].click()
         await page.wait_for_timeout(12_000)
+        # Listen a bit more for any late M3U8 requests
+        await page.wait_for_timeout(10_000)
 
-        m3u8_urls = await capture_m3u8_urls(page)
-        streams = resolve_streams(m3u8_urls)
+        streams = resolve_streams(all_m3u8)
 
         if not streams:
             print("    No streams found for this lecture")
@@ -187,14 +196,14 @@ async def _download_lecture(
                 )
             else:
                 ok = await download_stream(stream_url, output, cookies)
-            results[stream_type] = ok
+            streams_result[stream_type] = ok
 
     except Exception as exc:
         print(f"    ERROR: {exc}")
     finally:
         await page.close()
 
-    return results
+    return streams_result
 
 
 async def _cmd_download(
