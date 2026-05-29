@@ -101,8 +101,8 @@ async def download_stream(
 ) -> bool:
     """Download an HLS stream with ffmpeg, preferring the highest-resolution variant.
 
-    When *audio_url* is provided (e.g. for the camera stream which is
-    video-only) it is passed as a second input and the audio track is
+    When *audio_url* is provided (for video-only HLS variants like camera
+    or combined PIP) it is passed as a second input and the audio track is
     mapped into the output, producing a file with both video and audio.
     """
     cookie_str = build_cookie_string(cookies)

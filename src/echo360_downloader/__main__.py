@@ -190,7 +190,7 @@ async def _download_lecture(
                 output = lecture_dir / f"{stream_type}.mp4"
             print(f"    Downloading {stream_type} stream...")
 
-            if stream_type == "camera" and audio_url:
+            if stream_type in ("combined", "camera") and audio_url:
                 ok = await download_stream(
                     stream_url, output, cookies, audio_url=audio_url
                 )
