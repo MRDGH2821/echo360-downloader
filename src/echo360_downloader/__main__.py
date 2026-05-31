@@ -14,7 +14,7 @@ from echo360_downloader.auth import do_login, ensure_session
 from echo360_downloader.cli import parse_args
 from echo360_downloader.download import download_stream
 from echo360_downloader.scraper import get_course_name, get_lecture_list
-from echo360_downloader.streams import resolve_streams
+from echo360_downloader.streams import capture_m3u8_urls, resolve_streams
 from echo360_downloader.ui import (
     console,
     divider,
@@ -134,8 +134,10 @@ async def _download_lecture(
 
     page = await ctx.new_page()
     all_m3u8: set[str] = set()
+    await capture_m3u8_urls(page, all_m3u8)
     streams_result: dict[str, bool] = {}
 
+    # Keep request listener for late M3U8 requests after click
     def _capture(req):
         url = req.url
         if ".m3u8" in url and "content.echo360" in url:
@@ -193,7 +195,7 @@ async def _download_lecture(
 
         safe_title = sanitize_folder_name(lecture_title)
         for stream_type, stream_url in streams.items():
-            output = lecture_dir / f"{safe_title} - {stream_type}.mp4"
+            output = lecture_dir / f"{stream_type} - {safe_title}.mp4"
             if len(str(output)) > 240:
                 output = lecture_dir / f"{stream_type}.mp4"
 
