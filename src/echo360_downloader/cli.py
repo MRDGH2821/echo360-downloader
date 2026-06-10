@@ -78,6 +78,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run browser in headed mode (default: headless)",
     )
 
+    # --- compress ---
+    compress_parser = sub.add_parser(
+        "compress", help="Compress oversized videos in download folder"
+    )
+    compress_parser.add_argument(
+        "--dir",
+        type=Path,
+        default=Path("downloads"),
+        help="Directory to scan (default: ./downloads)",
+    )
+    compress_parser.add_argument(
+        "--size-limit",
+        type=int,
+        default=200,
+        help="Size threshold in MB (default: 200)",
+    )
+    compress_parser.add_argument(
+        "--target",
+        type=int,
+        default=190,
+        help="Target size in MB (default: 190, must be < --size-limit)",
+    )
+    compress_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Only list files that exceed the size limit; do not compress",
+    )
+
     return parser
 
 

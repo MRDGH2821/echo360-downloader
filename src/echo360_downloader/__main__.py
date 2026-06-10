@@ -341,6 +341,15 @@ def main(argv: list[str] | None = None) -> None:
                 args.headed,
             )
         )
+    elif args.command == "compress":
+        from echo360_downloader.compress import run as compress_run
+
+        compress_run(
+            scan_dir=args.dir,
+            size_limit_mb=args.size_limit,
+            target_size_mb=args.target,
+            dry_run=args.dry_run,
+        )
 
 
 if __name__ == "__main__":
