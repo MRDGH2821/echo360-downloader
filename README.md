@@ -116,15 +116,15 @@ to determine what's already done.
 
 ```
 downloads/
-├── COMP90020 - Distributed Algorithms/
+├── COURSE001 - Example Course/
 │   ├── 2026-03-04_15:15 - Go to class .../
 │   │   ├── combined.mp4
 │   │   ├── camera.mp4   (room audio muxed in)
 │   │   └── audio.mp4
 │   └── ...
-├── SWEN90004 - Modelling Complex Software Systems/
+├── COURSE002 - Example Course/
 │   └── ...
-└── SWEN90016 - Software Processes and Management/
+└── COURSE003 - Example Course/
     └── ...
 ```
 
