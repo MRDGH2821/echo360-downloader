@@ -11,7 +11,7 @@
       "files": ["*.sh", "**/.envrc"],
       "options": {
         "parser": "sh",
-        "trailingComma": "none"
+        "spaceRedirects": false
       }
     }
   ],

@@ -1,5 +1,7 @@
 # Echo360 Downloader
 
+[![Copier](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/copier-org/copier/refs/heads/master/img/badge/black-badge.json)](https://github.com/copier-org/copier)
+
 Automated lecture downloading from Echo360 using Playwright and ffmpeg.
 
 ## Requirements
@@ -195,3 +197,7 @@ watch what the browser is doing.
 Echo360 streams use CloudFront-signed URLs that expire after ~24 hours.
 If a download is interrupted, re-run the command — it will start fresh
 with new signed URLs.
+
+## Licence
+
+See [LICENCE](./LICENSE)

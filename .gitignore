@@ -21,9 +21,19 @@ Thumbs.db
 desktop.ini
 
 # IDE
+*.local
 *.swo
 *.swp
 .devenv
 .direnv
+.env
+.env.*
+!.env.sample
+.git
+.svn
+__MACOSX
+__pycache__
+dist/
 megalinter-reports/
 node_modules/
+target/
