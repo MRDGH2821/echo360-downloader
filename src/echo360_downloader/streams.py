@@ -22,65 +22,76 @@ async def capture_m3u8_urls(page: Page, existing: set[str] | None = None) -> set
     return urls
 
 
-# Stream-type indicators in Echo360 HLS URLs:
+# ---------------------------------------------------------------------------
+# Stream naming conventions
+# ---------------------------------------------------------------------------
+#
+# Section pages (course view) — streams have independent track IDs:
 #   s0  – audio-only (room microphone)
 #   s1  – camera / presenter (video-only)
-#   s2  – combined PIP (video-only in variants; _av.m3u8 master includes audio)
-#   _av – master playlist that declares EXT-X-MEDIA audio references
+#   s2  – combined PIP (video-only in variants; _av.m3u8 master has audio)
+#   _av – master playlist declaring EXT-X-MEDIA audio references
 #   _v  – master playlist for video-only streams
-#   q0/q1 – individual quality variants
+#   q0/q1 – quality variants
+#
+# Media pages (direct /media/<uuid>/public) — streams share track IDs 0/1:
+#   s0q0 / s0q1 – camera quality variants (video-only)
+#   s1q0 / s1q1 – screen quality variants (video-only)
+#   s1_av       – combined audio+video master playlist
+#
+# The master playlist (s1_av.m3u8 or s2_av.m3u8) declares sub-playlists
+# via EXT-X-STREAM-INF and EXT-X-MEDIA audio references.  The audio track
+# is always embedded in the _av master — there is no separate audio URL
+# for media pages.
+
+# Patterns to try, in priority order, for each canonical stream type.
+# First match wins; we try section-page patterns first, then media-page.
+#
+# NOTE: there is NO separate "audio" stream for media pages — audio is
+# embedded in the _av master.  For section pages, audio is s0q0/s0q1.
+# When a combined (_av) master exists, audio is handled by ffmpeg
+# automatically (no separate audio_url needed).
+_PATTERNS: dict[str, list[str]] = {
+    "combined": ["s2_av.m3u8", "s1_av.m3u8"],
+    "screen": ["s3q1.m3u8", "s3q0.m3u8", "s1q1.m3u8", "s1q0.m3u8"],
+    "camera": ["s0q1.m3u8", "s0q0.m3u8"],
+}
+
+
+def _extract_filename(url: str) -> str:
+    """Return the M3U8 filename without query string."""
+    return url.split("/")[-1].split("?")[0]
 
 
 def resolve_streams(m3u8_urls: set[str]) -> dict[str, str]:
     """Categorise raw M3U8 URLs into named streams.
 
     Returns a dict with keys ``combined``, ``camera``, ``audio`` mapped to
-    the best-quality playlist URL for each.
+    the best-quality playlist URL for each.  ``screen`` is also returned
+    when available.
+
+    When a ``combined`` master exists, ``audio`` is omitted — ffmpeg handles
+    the embedded audio track automatically.  ``audio`` is only set for
+    section pages that have a separate audio-only stream.
     """
-    sorted_urls = sorted(m3u8_urls)
+    url_map = {_extract_filename(u): u for u in m3u8_urls}
+
+    def find(patterns: list[str]) -> str | None:
+        for p in patterns:
+            if p in url_map:
+                return url_map[p]
+        return None
+
     streams: dict[str, str] = {}
+    for key, patterns in _PATTERNS.items():
+        url = find(patterns)
+        if url:
+            streams[key] = url
 
-    # Combined (PIP): prefer master s2_av.m3u8 (which links audio track)
-    for url in sorted_urls:
-        if "/s2_av." in url:
-            streams["combined"] = url
-            break
+    # For section pages (no combined master), look for standalone audio
     if "combined" not in streams:
-        for url in m3u8_urls:
-            if "/s2q1." in url:
-                streams["combined"] = url
-                break
-    if "combined" not in streams:
-        for url in m3u8_urls:
-            if "/s2q0." in url:
-                streams["combined"] = url
-                break
-
-    # Camera (presenter): prefer master s1_v.m3u8
-    for url in sorted_urls:
-        if "/s1_v." in url:
-            streams["camera"] = url
-            break
-    if "camera" not in streams:
-        for url in m3u8_urls:
-            if "/s1q1." in url:
-                streams["camera"] = url
-                break
-    if "camera" not in streams:
-        for url in m3u8_urls:
-            if "/s1q0." in url:
-                streams["camera"] = url
-                break
-
-    # Audio-only: s0q1 > s0q0
-    for url in m3u8_urls:
-        if "/s0q1." in url:
-            streams["audio"] = url
-            break
-    if "audio" not in streams:
-        for url in m3u8_urls:
-            if "/s0q0." in url:
-                streams["audio"] = url
-                break
+        audio = find(["s0q1.m3u8", "s0q0.m3u8"])
+        if audio:
+            streams["audio"] = audio
 
     return streams

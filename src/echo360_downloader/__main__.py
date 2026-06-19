@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 
 from echo360_downloader.auth import do_login
-from echo360_downloader.capture import capture_lecture_streams
+from echo360_downloader.capture import capture_lecture_streams, capture_media_streams
 from echo360_downloader.cli import parse_args
 from echo360_downloader.download import download_stream
 from echo360_downloader.scraper import get_course_name, get_lecture_list
@@ -25,6 +25,7 @@ from echo360_downloader.ui import (
     warning,
 )
 from echo360_downloader.utils import (
+    is_media_url,
     lecture_course_dir,
     sanitize_folder_name,
 )
@@ -49,7 +50,7 @@ async def _cmd_list(state_path: Path, section_url: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Download
+# Download — section (course page with lecture list)
 # ---------------------------------------------------------------------------
 
 
@@ -78,11 +79,15 @@ async def _download_lecture(
 
     for stream_type, stream_url in streams.items():
         output = lecture_dir / f"{stream_type}.mp4"
-        ok = False
-        if stream_type in ("combined", "camera") and audio_url:
-            ok = await download_stream(stream_url, output, cookies, audio_url=audio_url)
-        else:
-            ok = await download_stream(stream_url, output, cookies)
+        # Combined master playlists (_av.m3u8) already contain audio —
+        # pass the master URL directly, no separate audio_url needed.
+        # Camera streams on section pages may need a separate audio track.
+        ok = await download_stream(
+            stream_url,
+            output,
+            cookies,
+            audio_url=audio_url if stream_type == "camera" else None,
+        )
         streams_result[stream_type] = ok
 
     return streams_result
@@ -159,6 +164,77 @@ async def _cmd_download(
 
 
 # ---------------------------------------------------------------------------
+# Download — one-off media URL (direct video page)
+# ---------------------------------------------------------------------------
+
+
+async def _cmd_download_media(
+    state_path: Path,
+    media_url: str,
+    output_dir: Path,
+    headed: bool,
+    name_override: str | None = None,
+) -> None:
+    """Download a single video from a direct Echo360 media URL.
+
+    Media URLs (``/media/<uuid>/public``) are public links that require
+    no authentication.  The page loads a player that fetches signed M3U8
+    stream playlists on init — we intercept those from network requests.
+    """
+    from echo360_downloader.session import create_browser_context
+
+    async with create_browser_context(state_path, headed) as (_browser, ctx):
+        # Capture streams (also loads the page, so we get the title for free)
+        console.print("[dim]Loading media page…[/dim]")
+        captured = await capture_media_streams(ctx, media_url, name_override or "video")
+
+        if not captured:
+            warning("Failed to capture streams.")
+            return
+
+        streams = captured["streams"]
+        cookies = captured["cookies"]
+        title = captured.get("title") or name_override or "video"
+        audio_url = streams.get("audio")
+
+        # Derive a sensible folder name from the title
+        dir_name = sanitize_folder_name(title)
+        out = output_dir / dir_name
+        out.mkdir(parents=True, exist_ok=True)
+
+        heading(f"Video: {title}")
+        info(f"Output: [underline]{out}/[/]")
+        console.print(
+            f"[dim]Found {len(streams)} stream(s): {', '.join(streams)}[/dim]"
+        )
+
+        total = len(streams)
+        ok_count = 0
+
+        for stream_type, stream_url in streams.items():
+            output = out / f"{stream_type}.mp4"
+            # Combined master playlists already contain audio — pass the
+            # master URL directly.  Camera streams may need a separate track.
+            ok = await download_stream(
+                stream_url,
+                output,
+                cookies,
+                audio_url=audio_url if stream_type == "camera" else None,
+            )
+            if ok:
+                ok_count += 1
+
+        divider()
+        if ok_count == total:
+            success(f"All {ok_count}/{total} streams downloaded successfully")
+        else:
+            warning(
+                f"{ok_count}/{total} streams downloaded ({total - ok_count} failed)"
+            )
+        info(f"Output: [underline]{out}/[/]")
+
+
+# ---------------------------------------------------------------------------
 # Main dispatch
 # ---------------------------------------------------------------------------
 
@@ -190,15 +266,23 @@ def main(argv: list[str] | None = None) -> None:
         from echo360_downloader.utils import check_ffmpeg
 
         check_ffmpeg()
-        asyncio.run(
-            _cmd_download(
-                state_path,
-                args.section_url,
-                args.target,
-                args.output_dir,
-                args.headed,
+
+        if is_media_url(args.url):
+            asyncio.run(
+                _cmd_download_media(
+                    state_path, args.url, args.output_dir, args.headed, args.name
+                )
             )
-        )
+        else:
+            asyncio.run(
+                _cmd_download(
+                    state_path,
+                    args.url,
+                    args.target,
+                    args.output_dir,
+                    args.headed,
+                )
+            )
     elif args.command == "batch":
         from echo360_downloader.batch import run_batch
 

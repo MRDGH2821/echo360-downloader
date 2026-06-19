@@ -38,12 +38,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     # --- download ---
     dl_parser = sub.add_parser("download", help="Download lecture(s)")
-    dl_parser.add_argument("section_url", help="Echo360 section URL")
+    dl_parser.add_argument(
+        "url",
+        help="Echo360 section URL or direct media URL (/media/<uuid>/public)",
+    )
     dl_parser.add_argument(
         "target",
         nargs="?",
         default=None,
-        help='Lecture number, "ALL", or omit for interactive selection',
+        help='Lecture number, "ALL", or omit for interactive selection (ignored for media URLs)',
+    )
+    dl_parser.add_argument(
+        "-n",
+        "--name",
+        default=None,
+        help="Output folder name for media URLs (default: video title)",
     )
     dl_parser.add_argument(
         "--output-dir",

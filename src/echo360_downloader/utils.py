@@ -125,3 +125,18 @@ def lecture_course_dir(
     prefix = f"{date_iso}_{start_time}" if start_time else date_iso
     folder_name = sanitize_folder_name(f"{prefix} - {lecture_title}".strip(" -"))
     return download_root / course_dir_name / folder_name
+
+
+# ---------------------------------------------------------------------------
+# URL classification
+# ---------------------------------------------------------------------------
+
+_MEDIA_URL_RE = re.compile(
+    r"https?://echo360\.net\.au/media/[0-9a-f-]+/public",
+    re.IGNORECASE,
+)
+
+
+def is_media_url(url: str) -> bool:
+    """Return True if *url* is a direct Echo360 media/video page."""
+    return bool(_MEDIA_URL_RE.fullmatch(url.strip()))

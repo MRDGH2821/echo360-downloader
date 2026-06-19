@@ -25,6 +25,25 @@ async def get_course_name(page: Page) -> str:
     return name[:100] or "unknown-course"
 
 
+async def get_media_title(page: Page) -> str:
+    """Extract the video title from a direct media/video page."""
+    name = await page.evaluate("""
+        () => {
+            const selectors = [
+                '.video-title', '.media-title', '.player-title',
+                'h1', '.breadcrumb li:last-child', '.topbar-title',
+            ];
+            for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el && el.textContent.trim()) return el.textContent.trim();
+            }
+            return document.title || '';
+        }
+    """)
+    name = re.sub(r"\s+", " ", name).strip()
+    return name[:100] or "untitled-video"
+
+
 async def get_lecture_list(page: Page) -> list[dict]:
     """Extract lecture rows from the course page DOM.
 

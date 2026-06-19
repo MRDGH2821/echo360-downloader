@@ -237,12 +237,14 @@ async def _download_lecture_streams(
         async with sem:
             output = lecture_dir / f"{stream_type}.mp4"
 
-            if stream_type in ("combined", "camera") and audio_url:
-                ok = await download_stream(
-                    stream_url, output, cookies, audio_url=audio_url
-                )
-            else:
-                ok = await download_stream(stream_url, output, cookies)
+            # Combined master playlists already contain audio — pass the
+            # master URL directly.  Camera streams may need a separate track.
+            ok = await download_stream(
+                stream_url,
+                output,
+                cookies,
+                audio_url=audio_url if stream_type == "camera" else None,
+            )
 
             stream_results[stream_type] = "success" if ok else "failed"
             if not ok:
