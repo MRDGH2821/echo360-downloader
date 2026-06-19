@@ -44,6 +44,33 @@ uv sync
 uv run playwright install chromium
 ```
 
+## Building
+
+Build a wheel distribution:
+
+```bash
+uv build --wheel
+```
+
+The wheel is written to `dist/`. To install it locally:
+
+```bash
+uv pip install dist/echo360_downloader-*.whl
+```
+
+### Publishing
+
+A GitHub Actions workflow publishes to GitHub Package Registry
+when a version tag is pushed:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The package is then available at
+`https://ghp.dev/<owner>/<repo>/echo360-downloader`.
+
 ## Usage
 
 ### 1. Login (optional)

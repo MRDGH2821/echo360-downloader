@@ -1,0 +1,45 @@
+---
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - name: Build package
+        run: uv build
+      - name: Verify package
+        run: uv pip install dist/*.whl && python -c "import echo360_downloader; print('OK')"
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+  publish:
+    environment:
+      name: pypi
+      url: https://ghp.dev/${{ github.repository }}
+    name: Publish to GitHub Package Registry
+    needs: build
+    permissions:
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+      - env:
+          UV_PUBLISH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: Publish to GitHub Package Registry
+        run: uv publish --publish-url "https://ghp.dev/${{ github.repository }}"
+name: Publish to GitHub Package Registry
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
