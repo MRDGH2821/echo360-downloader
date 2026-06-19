@@ -42,8 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
     dl_parser.add_argument(
         "target",
         nargs="?",
-        default="ALL",
-        help='Lecture number, "ALL", or omit for all (default: ALL)',
+        default=None,
+        help='Lecture number, "ALL", or omit for interactive selection',
     )
     dl_parser.add_argument(
         "--output-dir",
