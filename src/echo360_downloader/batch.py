@@ -165,82 +165,39 @@ async def _capture_lecture(
     Returns ``None`` on any failure (row not found, no streams, timeout)
     so the caller can track it as a failed lecture.
     """
-    from echo360_downloader.streams import resolve_streams
+    from echo360_downloader.capture import capture_lecture_streams
 
     title = lecture.get("ariaLabel") or lecture.get("text", f"Lecture {idx}")
     lesson_id = lecture["lessonId"]
 
-    page = await ctx.new_page()
-    all_m3u8: set[str] = set()
-
-    def _capture(req):
-        url = req.url
-        if ".m3u8" in url and "content.echo360" in url:
-            all_m3u8.add(url)
-
-    page.on("request", _capture)
-
-    try:
-        await page.goto(section_url, wait_until="domcontentloaded", timeout=30_000)
-        await page.wait_for_timeout(2_000)
-
-        # Click the lecture row
-        clicked = await page.evaluate(
-            """(lessonId) => {
-                const rows = document.querySelectorAll('.class-row');
-                for (const row of rows) {
-                    if (row.getAttribute('data-test-lessonid') === lessonId) {
-                        row.scrollIntoView({block: 'center'});
-                        return true;
-                    }
-                }
-                return false;
-            }""",
-            lesson_id,
-        )
-        if not clicked:
-            warning(f"Row not found: {title}")
-            return None
-
-        rows = await page.query_selector_all(f'[data-test-lessonid="{lesson_id}"]')
-        if not rows:
-            warning(f"Selector not found: {title}")
-            return None
-
-        await rows[0].click()
-        await page.wait_for_timeout(12_000)
-        await page.wait_for_timeout(10_000)
-
-        streams = resolve_streams(all_m3u8)
-        if not streams:
-            warning(f"No streams for: {title}")
-            return None
-
-        cookies = await ctx.cookies()
-
-        date_iso = lecture.get("date", "")
-        start_time = lecture.get("startTime", "")
-        date_prefix = f"{date_iso}_{start_time}" if start_time else date_iso
-        folder_name = sanitize_folder_name(f"{date_prefix} - {title}".strip(" -"))
-        lecture_dir = course_root / folder_name
-
-        info(f"Captured: {title} ({', '.join(streams.keys())})")
-
-        return {
-            "title": title,
-            "lesson_id": lesson_id,
-            "date_iso": date_iso,
-            "start_time": start_time,
-            "streams": streams,
-            "cookies": cookies,
-            "lecture_dir": lecture_dir,
-        }
-
-    except Exception as exc:
-        error(f"Capture error ({title}): {exc}")
+    captured = await capture_lecture_streams(ctx, section_url, lesson_id, title)
+    if not captured:
         return None
-    finally:
-        await page.close()
+
+    streams = captured["streams"]
+    cookies = captured["cookies"]
+    date_iso = lecture.get("date", "")
+    start_time = lecture.get("startTime", "")
+
+    # batch caller already has course_root = output_root / course_dir_name,
+    # so build lecture_dir directly inside it.
+    from echo360_downloader.utils import sanitize_folder_name
+
+    date_prefix = f"{date_iso}_{start_time}" if start_time else date_iso
+    folder_name = sanitize_folder_name(f"{date_prefix} - {title}".strip(" -"))
+    lecture_dir = course_root / folder_name
+
+    info(f"Captured: {title} ({', '.join(streams.keys())})")
+
+    return {
+        "title": title,
+        "lesson_id": lesson_id,
+        "date_iso": date_iso,
+        "start_time": start_time,
+        "streams": streams,
+        "cookies": cookies,
+        "lecture_dir": lecture_dir,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -469,8 +426,8 @@ async def run_batch(
 
     check_ffmpeg()
 
-    from playwright.async_api import async_playwright
     from echo360_downloader.auth import do_login
+    from echo360_downloader.session import create_browser_context
 
     if not state_path.exists():
         heading("Login required")
@@ -482,13 +439,7 @@ async def run_batch(
 
     output_root = output_dir.resolve()
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=not headed)
-        ctx = await browser.new_context(
-            storage_state=str(state_path),
-            viewport={"width": 1280, "height": 900},
-        )
-
+    async with create_browser_context(state_path, headed) as (_browser, ctx):
         # Build results in config order, reusing existing status when possible
         updated_courses: list[dict] = []
         for i, course in enumerate(courses, 1):
@@ -529,8 +480,6 @@ async def run_batch(
                 else:
                     warning(f"{s}/{s + f} lectures downloaded ({f} failed)")
             divider()
-
-        await browser.close()
 
     write_status(status_path, updated_courses, parallel=parallel)
     success(f"Batch status written to [underline]{status_path}[/]")

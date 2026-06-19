@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 from pathlib import Path
@@ -79,3 +80,48 @@ def check_ffmpeg() -> None:
         )
     error(msg)
     raise RuntimeError(msg)
+
+
+# ---------------------------------------------------------------------------
+# Date parsing & folder construction
+# ---------------------------------------------------------------------------
+
+
+def parse_date_to_iso(raw: str) -> str:
+    """Extract a date from a lecture title and convert to YYYY-MM-DD.
+
+    Handles formats like ``March 4, 2026`` or ``March 4 2026``.
+    Returns the ISO string, or an empty string if no date is found.
+    """
+    m = re.search(r"(\w+ \d+,? \d{4})", raw)
+    if not m:
+        return ""
+    cleaned = m.group(1).replace(",", "")
+    for fmt in ("%B %d %Y", "%b %d %Y"):
+        try:
+            return datetime.datetime.strptime(cleaned, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+    return ""
+
+
+def lecture_course_dir(
+    download_root: Path,
+    course_dir_name: str,
+    lecture_title: str,
+    date_iso: str = "",
+    start_time: str = "",
+) -> Path:
+    """Build the per-lecture subdirectory within a course folder.
+
+    *date_iso* is an ISO 8601 date (YYYY-MM-DD) and *start_time* is the
+    24-hour start time (HH:mm) extracted from the Echo360 lesson ID.
+    When *start_time* is provided the folder name becomes
+    ``YYYY-MM-DD_HH:mm - Title/``, ensuring proper chronological sort
+    even with multiple lectures on the same day.
+    """
+    if not date_iso:
+        date_iso = parse_date_to_iso(lecture_title)
+    prefix = f"{date_iso}_{start_time}" if start_time else date_iso
+    folder_name = sanitize_folder_name(f"{prefix} - {lecture_title}".strip(" -"))
+    return download_root / course_dir_name / folder_name
