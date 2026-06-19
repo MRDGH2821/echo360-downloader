@@ -200,4 +200,4 @@ with new signed URLs.
 
 ## Licence
 
-See [LICENCE](./LICENSE)
+See [LICENCE](./LICENCE.txt)
