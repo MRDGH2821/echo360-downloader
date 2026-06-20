@@ -17,13 +17,11 @@ jobs:
           name: dist
           path: dist/
   publish:
-    environment:
-      name: pypi
-      url: https://ghp.dev/${{ github.repository }}
     name: Publish to GitHub Package Registry
     needs: build
     permissions:
-      id-token: write
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     steps:
       - name: Download distribution artifacts
