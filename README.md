@@ -37,39 +37,12 @@ brew install ffmpeg
 sudo pacman -S ffmpeg
 ```
 
-## Setup
+## Installation
 
 ```bash
-uv sync
-uv run playwright install chromium
+uv tool install git+https://github.com/MRDGH2821/echo360-downloader.git
+playwright install chromium
 ```
-
-## Building
-
-Build a wheel distribution:
-
-```bash
-uv build --wheel
-```
-
-The wheel is written to `dist/`. To install it locally:
-
-```bash
-uv pip install dist/echo360_downloader-*.whl
-```
-
-### Publishing
-
-A GitHub Actions workflow publishes to GitHub Package Registry
-when a version tag is pushed:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The package is then available at
-`https://ghp.dev/<owner>/<repo>/echo360-downloader`.
 
 ## Usage
 
@@ -79,7 +52,7 @@ If you haven't logged in before, `list` and `download` will
 automatically open a browser for SSO. Or run the login step explicitly:
 
 ```bash
-uv run echo360-dl login
+echo360-dl login
 ```
 
 Session cookies are saved automatically to:
@@ -92,7 +65,7 @@ Session cookies are saved automatically to:
 ### 2. List lectures in a course
 
 ```bash
-uv run echo360-dl list <section-url>
+echo360-dl list <section-url>
 ```
 
 ### 3. Download lectures
@@ -102,19 +75,19 @@ uv run echo360-dl list <section-url>
 Download all lectures (interactive selection by default):
 
 ```bash
-uv run echo360-dl download <section-url>
+echo360-dl download <section-url>
 ```
 
 Download a specific lecture by number (1-based):
 
 ```bash
-uv run echo360-dl download < section-url > 5
+echo360-dl download < section-url > 5
 ```
 
 Download all lectures explicitly:
 
 ```bash
-uv run echo360-dl download < section-url > ALL
+echo360-dl download < section-url > ALL
 ```
 
 #### From a direct media URL
@@ -122,13 +95,13 @@ uv run echo360-dl download < section-url > ALL
 Download a single video by its public media link (no login required):
 
 ```bash
-uv run echo360-dl download https://echo360.net.au/media/ < uuid > /public
+echo360-dl download https://echo360.net.au/media/ < uuid > /public
 ```
 
 With a custom output name:
 
 ```bash
-uv run echo360-dl download https://echo360.net.au/media/ -n "Lecture 5 Notes" < uuid > /public
+echo360-dl download https://echo360.net.au/media/ -n "Lecture 5 Notes" < uuid > /public
 ```
 
 #### Options
@@ -145,7 +118,7 @@ Download all courses from a YAML config file:
 
 ```bash
 # Create config (auto-generated if missing)
-uv run echo360-dl batch courses.yaml
+echo360-dl batch courses.yaml
 ```
 
 The YAML file supports a `parallel` setting for concurrent downloads:
@@ -168,7 +141,7 @@ to determine what's already done.
 If any downloaded videos are too large for submission (e.g. >500 MB), compress them:
 
 ```bash
-uv run echo360-dl compress downloads/
+echo360-dl compress downloads/
 ```
 
 ## Output structure
@@ -211,7 +184,7 @@ Delete the saved session and log in again:
 
 ```bash
 rm ~/.local/state/echo360/state.json
-uv run echo360-dl login
+echo360-dl login
 ```
 
 ### ffmpeg errors / corrupted output
