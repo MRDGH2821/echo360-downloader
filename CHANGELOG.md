@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file. See [conven
 
 ---
 
+## [0.1.1](/compare/v0.1.0..v0.1.1) - 2026-06-20
+
+### Bug Fixes
+
+- remove broken environment config from publish workflow - ([5386fa6](/commit/5386fa68fa836b49788901ae5b4b3071e814b580)) - MRDGH2821
+- add --system flag to verify step in publish workflow - ([cc66477](/commit/cc66477f8c706cec291d94c796d00243db6efcac)) - MRDGH2821
+- use venv for verify step in publish workflow - ([aafc2d2](/commit/aafc2d2cf03884fbccafd0d67a401a2dc3ac25f4)) - MRDGH2821
+
+### Build
+
+- update dependencies - ([b339004](/commit/b3390042dfae411c207890e7da3d8d52c3a985a1)) - MRDGH2821
+
+### Ci
+
+- **(megalinter)** update config - ([090391f](/commit/090391f48e699bc89460063f832bd01896a70935)) - MRDGH2821
+- update action versions - ([f925c5c](/commit/f925c5c84bcc899fd013691a336c04642571b722)) - MRDGH2821
+
+---
+
 ## [0.1.0] - 2026-06-19
 
 ### Bug Fixes
