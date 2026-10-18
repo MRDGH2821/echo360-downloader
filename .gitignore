@@ -12,7 +12,9 @@ downloads/
 browser-profile/
 profile/
 
-# Echo360 session state
+# Echo360 session state and batch cache (signed media URLs)
+*_status.yaml
+*_status.yml
 storage_state.json
 
 # OS

@@ -139,6 +139,20 @@ def read_status(path: Path) -> dict[str, dict]:
     return {c["url"]: c for c in courses if isinstance(c, dict) and c.get("url")}
 
 
+def _cached_stream_urls(previous: dict | None) -> dict[str, str]:
+    """Return valid cached playlist URLs from a prior lecture status entry."""
+    if not isinstance(previous, dict):
+        return {}
+    raw_urls = previous.get("stream_urls")
+    if not isinstance(raw_urls, dict):
+        return {}
+    return {
+        key: value
+        for key, value in raw_urls.items()
+        if isinstance(key, str) and isinstance(value, str) and ".m3u8" in value
+    }
+
+
 def write_status(path: Path, courses: list[dict], parallel: int) -> None:
     """Write course results to the status file."""
     doc: dict[str, Any] = {
@@ -146,6 +160,7 @@ def write_status(path: Path, courses: list[dict], parallel: int) -> None:
         "courses": courses,
     }
     path.write_text(yaml.safe_dump(doc, allow_unicode=True, sort_keys=False))
+    path.chmod(0o600)
 
 
 # ---------------------------------------------------------------------------
@@ -159,23 +174,32 @@ async def _capture_lecture(
     lecture: dict,
     idx: int,
     course_root: Path,
+    cached_streams: dict[str, str] | None = None,
+    cached_cookies: list[dict] | None = None,
 ) -> dict | None:
-    """Open a lecture row, capture M3U8 URLs, return metadata dict.
+    """Build download metadata, reusing cached stream URLs when available.
 
-    Returns ``None`` on any failure (row not found, no streams, timeout)
+    Returns ``None`` on capture failure (row not found, no streams, timeout)
     so the caller can track it as a failed lecture.
     """
-    from echo360_downloader.capture import capture_lecture_streams
-
     title = lecture.get("ariaLabel") or lecture.get("text", f"Lecture {idx}")
     lesson_id = lecture["lessonId"]
 
-    captured = await capture_lecture_streams(ctx, section_url, lesson_id, title)
-    if not captured:
-        return None
+    if cached_streams is not None:
+        streams = cached_streams
+        cookies = cached_cookies or []
+        info(f"Using cached stream URLs: {title}")
+        is_cached = True
+    else:
+        from echo360_downloader.capture import capture_lecture_streams
 
-    streams = captured["streams"]
-    cookies = captured["cookies"]
+        captured = await capture_lecture_streams(ctx, section_url, lesson_id, title)
+        if not captured:
+            return None
+        streams = captured["streams"]
+        cookies = captured["cookies"]
+        is_cached = False
+
     date_iso = lecture.get("date", "")
     start_time = lecture.get("startTime", "")
 
@@ -187,7 +211,8 @@ async def _capture_lecture(
     folder_name = sanitize_folder_name(f"{date_prefix} - {title}".strip(" -"))
     lecture_dir = course_root / folder_name
 
-    info(f"Captured: {title} ({', '.join(streams.keys())})")
+    if not is_cached:
+        info(f"Captured: {title} ({', '.join(streams.keys())})")
 
     return {
         "title": title,
@@ -197,6 +222,7 @@ async def _capture_lecture(
         "streams": streams,
         "cookies": cookies,
         "lecture_dir": lecture_dir,
+        "cached": is_cached,
     }
 
 
@@ -208,55 +234,71 @@ async def _capture_lecture(
 async def _download_lecture_streams(
     lec_info: dict,
     sem: asyncio.Semaphore,
+    refresh_streams=None,
 ) -> dict:
-    """Download all streams for one captured lecture under a semaphore.
-
-    The semaphore is acquired *per stream* rather than per lecture, so
-    ``parallel`` directly controls the maximum number of concurrent ffmpeg
-    processes regardless of how many lectures are in the queue.  Within a
-    lecture the three streams (combined, camera, audio) compete for
-    semaphore slots alongside streams from other lectures.
-    """
+    """Download cached/captured streams, refreshing failed cached URLs once."""
     from echo360_downloader.download import download_stream
 
     title = lec_info["title"]
-    streams = lec_info["streams"]
+    stream_urls = dict(lec_info["streams"])
     cookies = lec_info["cookies"]
     lecture_dir = lec_info["lecture_dir"]
-    audio_url = streams.get("audio")
 
     lecture_dir.mkdir(parents=True, exist_ok=True)
-
     stream_results: dict[str, str] = {}
-    lecture_ok = True
 
-    async def _dl(stream_type: str, stream_url: str) -> None:
-        nonlocal lecture_ok
-        # Semaphore acquired per stream — parallel controls total concurrent
-        # ffmpeg processes, not whole-lecture slots.
+    async def _download_one(
+        stream_type: str, stream_url: str, cookie_state: list[dict]
+    ) -> bool:
         async with sem:
             output = lecture_dir / f"{stream_type}.mp4"
-
-            # Combined master playlists already contain audio — pass the
-            # master URL directly.  Camera streams may need a separate track.
-            ok = await download_stream(
+            return await download_stream(
                 stream_url,
                 output,
-                cookies,
-                audio_url=audio_url if stream_type == "camera" else None,
+                cookie_state,
+                audio_url=(
+                    stream_urls.get("audio") if stream_type == "camera" else None
+                ),
             )
 
+    async def _attempt_all() -> None:
+        async def _attempt(stream_type: str, stream_url: str) -> None:
+            ok = await _download_one(stream_type, stream_url, cookies)
             stream_results[stream_type] = "success" if ok else "failed"
-            if not ok:
-                lecture_ok = False
 
-    tasks = [_dl(st, su) for st, su in streams.items()]
-    await asyncio.gather(*tasks)
+        await asyncio.gather(
+            *(_attempt(kind, url) for kind, url in stream_urls.items())
+        )
 
+    await _attempt_all()
+
+    failed_cached = [
+        kind for kind, outcome in stream_results.items() if outcome == "failed"
+    ]
+    if lec_info.get("cached") and failed_cached and refresh_streams is not None:
+        info(f"Cached URL failed for {title}; recapturing streams and retrying…")
+        refreshed = await refresh_streams()
+        if refreshed:
+            fresh_urls = refreshed.get("streams", {})
+            stream_urls.update(fresh_urls)
+            cookies = refreshed.get("cookies", cookies)
+            for stream_type in failed_cached:
+                fresh_url = fresh_urls.get(stream_type)
+                if not fresh_url:
+                    stream_urls.pop(stream_type, None)
+                    continue
+                ok = await _download_one(stream_type, fresh_url, cookies)
+                stream_results[stream_type] = "success" if ok else "failed"
+
+    lecture_ok = bool(stream_results) and all(
+        outcome == "success" for outcome in stream_results.values()
+    )
     entry: dict[str, Any] = {
         "title": title,
+        "lesson_id": lec_info["lesson_id"],
         "outcome": "success" if lecture_ok else "partial",
         "streams": stream_results,
+        "stream_urls": stream_urls,
     }
     date_iso = lec_info.get("date_iso", "")
     start_time = lec_info.get("start_time", "")
@@ -280,6 +322,7 @@ async def _download_course(
     output_dir: Path,
     output_root: Path,
     parallel: int = 1,
+    previous: dict | None = None,
 ) -> dict:
     """Download all lectures for one course URL.
 
@@ -333,16 +376,33 @@ async def _download_course(
         await page.close()
 
         total = len(lectures)
-        console.print(f"\n[bold]Capturing {total} lectures…[/]")
+        console.print(f"\n[bold]Preparing {total} lectures…[/]")
 
-        # ── Phase 1: capture M3U8 URLs (serial, needs browser) ─────
+        previous_lectures = {
+            str(entry.get("lesson_id")): entry
+            for entry in (previous or {}).get("lectures", [])
+            if isinstance(entry, dict) and entry.get("lesson_id") is not None
+        }
+        current_cookies = await ctx.cookies()
+
+        # ── Phase 1: reuse cached URLs or capture them serially ──────
         captured: list[dict] = []
         capture_failed = 0
 
         for idx, lec in enumerate(lectures, 1):
             title = lec.get("ariaLabel") or lec.get("text", f"Lecture {idx}")
             console.print(f"\n[bold][{idx}/{total}] {title}[/]")
-            lec_info = await _capture_lecture(ctx, section_url, lec, idx, course_root)
+            prior = previous_lectures.get(str(lec.get("lessonId", "")))
+            cached_urls = _cached_stream_urls(prior)
+            lec_info = await _capture_lecture(
+                ctx,
+                section_url,
+                lec,
+                idx,
+                course_root,
+                cached_streams=cached_urls or None,
+                cached_cookies=current_cookies,
+            )
             if lec_info is not None:
                 captured.append(lec_info)
             else:
@@ -363,8 +423,31 @@ async def _download_course(
             f"\n[bold]Downloading {len(captured)} lectures (parallel={parallel})…[/]"
         )
         sem = asyncio.Semaphore(parallel)
+        capture_lock = asyncio.Lock()
 
-        download_tasks = [_download_lecture_streams(ci, sem) for ci in captured]
+        download_tasks = []
+        for lec_info in captured:
+            refresh_streams = None
+            if lec_info.get("cached"):
+
+                async def _refresh_cached_urls(lecture_info=lec_info):
+                    from echo360_downloader.capture import capture_lecture_streams
+
+                    async with capture_lock:
+                        return await capture_lecture_streams(
+                            ctx,
+                            section_url,
+                            lecture_info["lesson_id"],
+                            lecture_info["title"],
+                        )
+
+                refresh_streams = _refresh_cached_urls
+            download_tasks.append(
+                _download_lecture_streams(
+                    lec_info, sem, refresh_streams=refresh_streams
+                )
+            )
+
         completed = await asyncio.gather(*download_tasks)
 
         # Aggregate results
@@ -473,6 +556,7 @@ async def run_batch(
                 output_dir,
                 output_root,
                 parallel=parallel,
+                previous=existing_by_url.get(url),
             )
             updated_courses.append(result)
 
