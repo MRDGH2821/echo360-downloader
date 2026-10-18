@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 from echo360_downloader.ui import dim, error, success
 from echo360_downloader.utils import build_cookie_string
 
-
 # ---------------------------------------------------------------------------
 # M3U8 helpers
 # ---------------------------------------------------------------------------
@@ -41,13 +40,48 @@ async def _fetch_m3u8(url: str, cookie_str: str = "") -> str:
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
-    except asyncio.TimeoutError:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+    except TimeoutError:
         proc.kill()
         return ""
     if proc.returncode != 0:
         return ""
     return stdout.decode(errors="replace")
+
+
+def _ffmpeg_error_summary(stderr_text: str) -> str:
+    """Extract actionable FFmpeg errors without matching build configuration."""
+    patterns = (
+        r"\bHTTP error \d+\b",
+        r"\b403 Forbidden\b",
+        r"\bForbidden\b",
+        r"error when",
+        r"failed to",
+        r"server returned",
+        r"invalid data",
+        r"unable to",
+    )
+    lines = [line.strip() for line in stderr_text.splitlines() if line.strip()]
+    matches = [
+        line
+        for line in lines
+        if any(re.search(pattern, line, flags=re.IGNORECASE) for pattern in patterns)
+    ]
+    if not matches:
+        matches = lines[-3:]
+    return "; ".join(line[:400] for line in matches[-3:]) or "unknown error"
+
+
+def _ffmpeg_headers(cookie_str: str) -> str:
+    """Return the browser-like HTTP headers required for Echo360 HLS requests."""
+    headers = [
+        "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+        "Referer: https://echo360.net.au/",
+        "Origin: https://echo360.net.au",
+    ]
+    if cookie_str:
+        headers.append(f"Cookie: {cookie_str}")
+    return "\r\n".join(headers) + "\r\n"
 
 
 def _abs_url(ref: str, base_abs: str, query: str) -> str:
@@ -253,12 +287,14 @@ async def download_stream(
             "-y",
             "-protocol_whitelist",
             "file,http,https,tcp,tls,crypto",
+            "-headers",
+            _ffmpeg_headers(cookie_str),
             "-i",
             video_input,
         ]
 
         if audio_input:
-            cmd += ["-i", audio_input]
+            cmd += ["-headers", _ffmpeg_headers(cookie_str), "-i", audio_input]
 
         cmd += [
             "-c:v",
@@ -277,19 +313,13 @@ async def download_stream(
         )
         try:
             _, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             error(f"Timeout downloading {output_path.name}")
             return False
 
         if proc.returncode != 0:
-            stderr_text = stderr.decode(errors="replace")
-            err_lines = [
-                ln.strip()
-                for ln in stderr_text.splitlines()
-                if "error" in ln.lower() or "403" in ln or "forbidden" in ln.lower()
-            ]
-            error_msg = "; ".join(err_lines[:3]) if err_lines else "unknown error"
+            error_msg = _ffmpeg_error_summary(stderr.decode(errors="replace"))
             error(f"Download failed: {error_msg}")
             return False
 

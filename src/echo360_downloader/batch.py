@@ -129,7 +129,7 @@ def read_status(path: Path) -> dict[str, dict]:
         return {}
     try:
         raw = yaml.safe_load(path.read_text())
-    except Exception:
+    except Exception:  # noqa: BLE001 - unreadable status files are treated as empty
         return {}
     if not raw or "courses" not in raw:
         return {}
@@ -296,8 +296,8 @@ async def _download_course(
         Browser interaction is no longer needed — every ffmpeg call is
         an independent subprocess.
     """
-    from echo360_downloader.scraper import get_course_name, get_lecture_list
     from echo360_downloader.auth import ensure_session
+    from echo360_downloader.scraper import get_course_name, get_lecture_list
 
     result: dict = {
         "url": section_url,
@@ -390,7 +390,7 @@ async def _download_course(
             "downloaded_at": datetime.datetime.now().isoformat(timespec="seconds"),
         }
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - record any course-level failure
         result["status"] = "failed"
         result["error"] = str(exc)
     finally:
@@ -403,6 +403,11 @@ async def _download_course(
 # ---------------------------------------------------------------------------
 # Batch runner
 # ---------------------------------------------------------------------------
+
+
+def _should_skip_course(previous: dict) -> bool:
+    """Only skip a batch entry after its course fully completed successfully."""
+    return previous.get("status") == "completed" and "summary" in previous
 
 
 async def run_batch(
@@ -452,7 +457,7 @@ async def run_batch(
             # Skip if already completed in status file
             if url in existing_by_url:
                 prev = existing_by_url[url]
-                if prev.get("status") in ("completed", "partial") and "summary" in prev:
+                if _should_skip_course(prev):
                     info(
                         f"[{i}/{len(courses)}] Skipping [underline]{url}[/] "
                         f"(already done — see {status_path.name})"
