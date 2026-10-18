@@ -134,7 +134,10 @@ Set `parallel: 3` or `parallel: 4` to download multiple streams at once.
 Results are written to a **separate status file** (`<config>_status.yaml`, e.g.
 `courses_status.yaml`) so your original config stays clean. Re-run the same
 command to skip already-completed courses — the status file is read on startup
-to determine what's already done.
+to determine what's already done. For incomplete courses, it also caches each
+lecture's stream URLs; later runs reuse them and recapture/retry if a cached URL
+fails. Because these URLs can grant temporary media access, the status file is
+restricted to the current user on POSIX systems.
 
 ### 5. Compress oversized videos
 
