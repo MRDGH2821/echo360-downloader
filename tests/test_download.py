@@ -1,7 +1,32 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from echo360_downloader.batch import _should_skip_course
-from echo360_downloader.download import _ffmpeg_error_summary, _ffmpeg_headers
+from echo360_downloader.download import (
+    _ffmpeg_error_summary,
+    _ffmpeg_headers,
+    _rewrite_local_playlist_refs,
+)
+
+
+class LocalPlaylistReferenceTests(unittest.TestCase):
+    def test_rewrites_local_playlist_references_but_keeps_remote_segments(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            directory = Path(temp_dir)
+            master = directory / "master.m3u8"
+            variant = directory / "variant.m3u8"
+            segment_url = "https://content.echo360.net.au/segment.m4s?x-uid=abc"
+            master.write_text(f'#EXTM3U\n#EXT-X-MEDIA:URI="{variant}"\n{variant}\n')
+            variant.write_text(f"#EXTM3U\n{segment_url}\n")
+
+            _rewrite_local_playlist_refs(directory)
+
+            master_content = master.read_text()
+            self.assertIn('URI="variant.m3u8"', master_content)
+            self.assertIn("\nvariant.m3u8\n", master_content)
+            self.assertNotIn(str(variant), master_content)
+            self.assertIn(segment_url, variant.read_text())
 
 
 class BatchResumeTests(unittest.TestCase):

@@ -3,13 +3,57 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+import http.server
 import re
 import tempfile
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
 from echo360_downloader.ui import dim, error, success
 from echo360_downloader.utils import build_cookie_string
+
+# ---------------------------------------------------------------------------
+# Local playlist serving
+# ---------------------------------------------------------------------------
+
+
+class _QuietPlaylistHandler(http.server.SimpleHTTPRequestHandler):
+    """Serve temporary playlists without logging signed URLs or headers."""
+
+    def log_message(self, format: str, *args: object) -> None:
+        return
+
+
+def _rewrite_local_playlist_refs(directory: Path) -> None:
+    """Make local playlist-to-playlist references relative for HTTP serving."""
+    playlists = list(directory.glob("*.m3u8"))
+    replacements = {str(path): path.name for path in playlists}
+    for playlist in playlists:
+        content = playlist.read_text()
+        for source, target in replacements.items():
+            content = content.replace(source, target)
+        playlist.write_text(content)
+
+
+@contextmanager
+def _serve_playlist_directory(directory: Path) -> Iterator[str]:
+    """Serve temporary playlists over loopback so FFmpeg propagates headers."""
+    handler = functools.partial(_QuietPlaylistHandler, directory=str(directory))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
 
 # ---------------------------------------------------------------------------
 # M3U8 helpers
@@ -280,43 +324,50 @@ async def download_stream(
                 audio_file.write_text(audio_rewritten)
                 audio_input = str(audio_file)
 
-        # Build ffmpeg command
-        # -protocol_whitelist must be format-level (before any -i)
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-protocol_whitelist",
-            "file,http,https,tcp,tls,crypto",
-            "-headers",
-            _ffmpeg_headers(cookie_str),
-            "-i",
-            video_input,
-        ]
+        _rewrite_local_playlist_refs(Path(tmpdir))
+        with _serve_playlist_directory(Path(tmpdir)) as playlist_base:
+            video_input_url = f"{playlist_base}/{Path(video_input).name}"
 
-        if audio_input:
-            cmd += ["-headers", _ffmpeg_headers(cookie_str), "-i", audio_input]
+            # Headers on a local file playlist are not inherited by FFmpeg's
+            # nested HTTP segment requests.  Serving playlists over loopback
+            # HTTP lets the HLS demuxer carry these headers to Echo360.
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-protocol_whitelist",
+                "file,http,https,tcp,tls,crypto",
+                "-headers",
+                _ffmpeg_headers(cookie_str),
+                "-i",
+                video_input_url,
+            ]
 
-        cmd += [
-            "-c:v",
-            "copy",
-            "-c:a",
-            "copy",
-            "-movflags",
-            "+faststart",
-            str(output_path),
-        ]
+            if audio_input:
+                audio_input_url = f"{playlist_base}/{Path(audio_input).name}"
+                cmd += ["-headers", _ffmpeg_headers(cookie_str), "-i", audio_input_url]
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
-        except TimeoutError:
-            proc.kill()
-            error(f"Timeout downloading {output_path.name}")
-            return False
+            cmd += [
+                "-c:v",
+                "copy",
+                "-c:a",
+                "copy",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+            except TimeoutError:
+                proc.kill()
+                await proc.wait()
+                error(f"Timeout downloading {output_path.name}")
+                return False
 
         if proc.returncode != 0:
             error_msg = _ffmpeg_error_summary(stderr.decode(errors="replace"))
